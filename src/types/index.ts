@@ -62,6 +62,11 @@ export interface CategoryPayload {
   type: 'INCOME' | 'EXPENSE';
 }
 
+export interface CategoryUpdatePayload {
+  name?: string;
+  type?: 'INCOME' | 'EXPENSE';
+}
+
 // Report types
 export interface ReportQueryParams {
   startDate: string;

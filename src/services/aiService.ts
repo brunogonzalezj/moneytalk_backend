@@ -1,54 +1,52 @@
 import OpenAI from "openai";
+import { PrismaClient } from "@prisma/client";
 
 const openai = new OpenAI({apiKey: process.env.OPENAI_API_KEY});
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_API_URL = 'https://api.openai.com/v1';
 
-const CATEGORIES = ['Food', 'Transport', 'Salary', 'Entertainment', 'Others'];
+const prisma = new PrismaClient();
+
 
 interface CategorizeResult {
     categoryName: string;
     amountExtracted: number;
     descriptionExtracted: string;
-    transactionTypeExtracted: 'income' | 'expense';
-}
-
-function isAudio(textOrAudio: any): boolean {
-    if (typeof textOrAudio !== 'string') return false;
-    return textOrAudio.trim().startsWith('data:audio') || textOrAudio.endsWith('.mp3') || textOrAudio.endsWith('.wav');
-}
-
-async function transcribeWithWhisper(audio: string): Promise<string> {
-    // Placeholder: implement actual Whisper API call if needed
-    throw new Error('Whisper transcription not implemented. Provide text or implement audio support.');
+    transactionTypeExtracted: 'INCOME' | 'EXPENSE';
 }
 
 async function gptCategorize(text: string): Promise<CategorizeResult> {
-    const prompt = `
-Given the following transaction description, extract:
-- category: one of ${CATEGORIES.join(', ')}
-- amount: as a number (if present)
-- description: a short summary
-- transactionType: 'income' or 'expense' based on the context
-Return a JSON object with keys: category, amount, description, trasactionType.
+    // 1. Trae todas las categorías con su tipo
+    const categories = await prisma.category.findMany({
+        select: { name: true, type: true },
+        orderBy: { name: 'asc' }
+    });
+    const categoryNames = categories.map(c => c.name);
 
-Description: "${text}"
+    const prompt = `
+Dada la siguiente descripción de transacción, extrae:
+- categoría: una de ${categoryNames.join(', ')}
+- monto: como número (si está presente)
+- descripción: un resumen corto
+- tipo de transacción: 'INCOME' o 'EXPENSE' según el contexto
+Devuelve un objeto JSON con las claves: category, amount, description, transactionType.
+
+Descripción: "${text}"
 `;
 
     const response = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
-            messages: [
-                {
-                    role: 'system',
-                    content: 'You are a helpful assistant for transaction categorization. I need all responses in spanish.'
-                },
-                {role: 'user', content: prompt}
-            ],
-            temperature: 0.2,
-            max_completion_tokens: 500
-        }
-    );
+        model: 'gpt-4o-mini',
+        messages: [
+            {
+                role: 'system',
+                content: 'Eres un asistente útil para categorización de transacciones. Responde siempre en español.'
+            },
+            { role: 'user', content: prompt }
+        ],
+        temperature: 0.2,
+        max_completion_tokens: 500
+    });
 
     const content = response.choices?.[0]?.message?.content;
     if (!content) throw new Error('No response from GPT');
@@ -56,12 +54,19 @@ Description: "${text}"
     try {
         const clean = content.replace(/```json|```/g, '').trim();
         const parsed = JSON.parse(clean);
+
+        // 2. Filtra las categorías por el tipo devuelto por GPT
+        const validCategories = categories
+            .filter(c => c.type === parsed.transactionType)
+            .map(c => c.name);
+
+        // 3. Valida que la categoría esté en la lista filtrada
         if (
             typeof parsed.category !== 'string' ||
             typeof parsed.amount !== 'number' ||
             typeof parsed.description !== 'string' ||
             typeof parsed.transactionType !== 'string' ||
-            !CATEGORIES.includes(parsed.category)
+            !validCategories.includes(parsed.category)
         ) {
             throw new Error('Invalid response shape');
         }

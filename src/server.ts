@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import {categorizeTransaction} from "./services/aiService";
 import authRoute from "./routes/auth.route";
 import transactionRoute from "./routes/transaction.route";
+import categoryRoute from "./routes/category.route";
 
 dotenv.config();
 
@@ -16,7 +17,7 @@ const prisma = new PrismaClient();
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
 
 // Middlewares de seguridad y parseo
-//app.use(helmet());
+app.use(helmet());
 app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json());
 
@@ -33,6 +34,7 @@ app.use('/api/gpt/categorize', categorizeTransaction)
 // Rutas (importa y usa tus routers aquí)
 app.use('/api/auth', authRoute)
 app.use('/api/transactions', transactionRoute)
+app.use('/api/categories', categoryRoute)
 // Ejemplo:
 // import authRouter from './routes/auth';
 // app.use('/api/auth', authRouter);
