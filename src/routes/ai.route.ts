@@ -14,7 +14,7 @@ const aiRateLimit = rateLimit({
   message: 'Demasiadas solicitudes de recomendaciones, intenta más tarde'
 });
 
-router.post('/recommendations', authMiddleware, generateRecommendations);
+router.post('/recommendations', aiRateLimit, authMiddleware, generateRecommendations);
 
 export default router;
 
