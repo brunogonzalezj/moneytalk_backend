@@ -39,14 +39,15 @@ export interface TokenPayload {
 export interface TransactionPayload {
   amount: number;
   description: string;
-  date: string;
+  date: string | Date;
   categoryId: number;
+  type?: 'INCOME' | 'EXPENSE';
 }
 
 export interface TransactionUpdatePayload {
   amount?: number;
   description?: string;
-  date?: string;
+  date?: string | Date;
   categoryId?: number;
 }
 
@@ -101,5 +102,41 @@ export interface PaginatedResponse<T> {
     page: number;
     totalPages: number;
     totalCount: number;
+  };
+}
+
+// Transaction list/query types for GET /api/transactions
+export type TransactionFilterType = 'INCOME' | 'EXPENSE' | 'all';
+
+export interface TransactionsQueryParams {
+  userId: number;
+  page: number; // >= 1
+  limit: number; // >= 1
+  type: TransactionFilterType; // category.type filter
+  category?: number; // categoryId
+  dateFrom?: string; // YYYY-MM-DD
+  dateTo?: string;   // YYYY-MM-DD
+  search?: string;   // description search
+}
+
+export interface TransactionListItem {
+  id: string;
+  description: string;
+  amount: number;
+  category: string; // category.name
+  categoryId: number;
+  type: 'INCOME' | 'EXPENSE'; // category.type
+  date: string; // YYYY-MM-DD
+  createdAt: string; // ISO
+}
+
+export interface TransactionsListResponse {
+  transactions: TransactionListItem[];
+  pagination: {
+    currentPage: number;
+    totalPages: number;
+    totalItems: number;
+    hasNextPage: boolean;
+    hasPrevPage: boolean;
   };
 }

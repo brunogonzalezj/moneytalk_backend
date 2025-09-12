@@ -1,10 +1,19 @@
 //Create routes for transaction operations
 import express from 'express';
 import { TransactionController } from '../controllers/transaction.controller';
+import { authMiddleware } from '../middlewares/authMiddleware';
 
 const router = express.Router();
-// Create a new transaction
 
+// Proteger todas las rutas de transacciones
+
+// Get transactions con paginación, filtros y ordenamiento
+router.get(
+  '/',
+    authMiddleware ,TransactionController.getTransactions
+);
+
+// Crear una nueva transacción
 router.post(
   '/',
   TransactionController.createTransaction
