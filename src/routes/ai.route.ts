@@ -7,7 +7,7 @@ const router = express.Router();
 
 // Rate limiting exclusivo para AI
 const aiRateLimit = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
+  windowMs: 40 * 60 * 1000, // 15 minutos
   max: 5, // máximo 5 requests por ventana por IP/usuario
   standardHeaders: true,
   legacyHeaders: false,

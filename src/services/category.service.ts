@@ -37,14 +37,14 @@ export class CategoryService {
 
     static async updateCategory(id: number, data: CategoryUpdatePayload, userId: number) {
         return await prisma.category.updateMany({
-            where: { id, userId },
+            where: { id },
             data,
         });
     }
 
     static async deleteCategory(id: number, userId: number) {
         return await prisma.category.deleteMany({
-            where: { id, userId },
+            where: { id },
         });
     }
 }

@@ -8,6 +8,9 @@ import authRoute from "./routes/auth.route";
 import transactionRoute from "./routes/transaction.route";
 import categoryRoute from "./routes/category.route";
 import aiRoute from "./routes/ai.route";
+import budgetRoute from "./routes/budget.route";
+import recurringPaymentRoute from "./routes/recurringPayment.route";
+import { CronJobsService } from "./services/cronJobs.service";
 
 dotenv.config();
 
@@ -35,9 +38,8 @@ app.use('/api/auth', authRoute)
 app.use('/api/transactions', transactionRoute)
 app.use('/api/categories', categoryRoute)
 app.use('/api/ai', aiRoute)
-// Ejemplo:
-// import authRouter from './routes/auth';
-// app.use('/api/auth', authRouter);
+app.use('/api/budgets', budgetRoute)
+app.use('/api/recurring-payments', recurringPaymentRoute)
 
 // Middleware de manejo de errores global
 app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -48,8 +50,24 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
     });
 });
 
+// Iniciar cron jobs para pagos recurrentes
+const ENABLE_CRON = process.env.ENABLE_CRON !== 'false'; // Por defecto true
+const CRON_TEST_MODE = process.env.CRON_TEST_MODE === 'true'; // Por defecto false
+
+if (ENABLE_CRON) {
+    if (CRON_TEST_MODE) {
+        console.log('⚠️ Iniciando cron jobs en MODO TEST (cada minuto)');
+        CronJobsService.startRecurringPaymentsCronJobForTesting();
+    } else {
+        console.log('✅ Iniciando cron jobs en modo PRODUCCIÓN (diario a las 00:01)');
+        CronJobsService.startRecurringPaymentsCronJob();
+    }
+} else {
+    console.log('⏸️ Cron jobs deshabilitados (ENABLE_CRON=false)');
+}
+
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Servidor escuchando en puerto ${PORT}`);
+    console.log(`🚀 Servidor escuchando en puerto ${PORT}`);
 });
