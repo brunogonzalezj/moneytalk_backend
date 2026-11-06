@@ -2,7 +2,8 @@ import { body, param, query } from 'express-validator';
 import { isIsoDate } from '../utils/dates';
 
 export const MAX_PAGE_SIZE = 100;
-const MAX_SUMMARY_DAYS = 400;
+// Longest range per grouping, so a series never has more than ~400 points
+const MAX_SUMMARY_DAYS = { day: 400, week: 2800, month: 3700 } as const;
 const TYPES = ['INCOME', 'EXPENSE'];
 
 const isoDateParam = (field: string) =>
@@ -61,14 +62,18 @@ export const exportTransactionsValidator = [
 ];
 
 export const summaryValidator = [
-  query('from').custom(isIsoDate).withMessage('from es obligatorio (YYYY-MM-DD)'),
+  // Without `from` the totals cover all history and no series is returned
+  query('from').optional().custom(isIsoDate).withMessage('from debe tener el formato YYYY-MM-DD'),
   query('to').custom(isIsoDate).withMessage('to es obligatorio (YYYY-MM-DD)'),
   query('groupBy').optional().isIn(['day', 'week', 'month']).withMessage('groupBy debe ser day, week o month'),
   query('to').custom((to, { req }) => {
-    const from = req.query?.from as string;
+    const from = req.query?.from as string | undefined;
+    if (!from) return true;
     const days = (Date.parse(to) - Date.parse(from)) / 86_400_000;
     if (days < 0) throw new Error('to debe ser posterior a from');
-    if (days > MAX_SUMMARY_DAYS) throw new Error(`El rango máximo es de ${MAX_SUMMARY_DAYS} días`);
+    const groupBy = (req.query?.groupBy as keyof typeof MAX_SUMMARY_DAYS | undefined) ?? 'day';
+    const max = MAX_SUMMARY_DAYS[groupBy] ?? MAX_SUMMARY_DAYS.day;
+    if (days > max) throw new Error(`El rango máximo agrupando por ${groupBy} es de ${max} días`);
     return true;
   }),
 ];

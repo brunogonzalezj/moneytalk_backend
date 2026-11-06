@@ -1,4 +1,4 @@
-import { RecurrenceFrequency } from '@prisma/client';
+import { RecurrenceFrequency } from '../generated/prisma/client';
 import { env } from '../config/env';
 
 const DAY_MS = 24 * 60 * 60 * 1000;

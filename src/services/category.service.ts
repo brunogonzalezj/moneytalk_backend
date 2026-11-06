@@ -1,4 +1,4 @@
-import { TransactionType } from '@prisma/client';
+import { TransactionType } from '../generated/prisma/client';
 import prisma from '../lib/prisma';
 import { AppError } from '../utils/AppError';
 import { normalizeName } from '../utils/text';

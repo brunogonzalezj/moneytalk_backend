@@ -1,5 +1,5 @@
 import { body, query } from 'express-validator';
-import { SavingsGoalStatus, SavingsGoalType } from '@prisma/client';
+import { SavingsGoalStatus, SavingsGoalType } from '../generated/prisma/client';
 
 const TYPES = Object.values(SavingsGoalType);
 const STATUSES = Object.values(SavingsGoalStatus);

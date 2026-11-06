@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { matchedData } from 'express-validator';
-import { TransactionType } from '@prisma/client';
+import { TransactionType } from '../generated/prisma/client';
 import { GroupBy, TransactionFilters, TransactionService } from '../services/transaction.service';
 import { ExportFormat } from '../types';
 
@@ -23,7 +23,7 @@ export class TransactionController {
   }
 
   static async summary(req: Request, res: Response) {
-    const { from, to, groupBy } = req.query as { from: string; to: string; groupBy?: GroupBy };
+    const { from, to, groupBy } = req.query as { from?: string; to: string; groupBy?: GroupBy };
     res.json(await TransactionService.summary(req.user!.id, from, to, groupBy ?? 'day'));
   }
 

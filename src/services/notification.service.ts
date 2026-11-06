@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import { env } from '../config/env';
 import prisma from '../lib/prisma';
 import { getWebPush } from '../lib/webPush';

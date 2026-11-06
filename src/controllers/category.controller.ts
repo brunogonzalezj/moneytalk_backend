@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { TransactionType } from '@prisma/client';
+import { TransactionType } from '../generated/prisma/client';
 import { CategoryService } from '../services/category.service';
 
 export class CategoryController {

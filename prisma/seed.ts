@@ -3,7 +3,8 @@
  * with. Idempotent, so it is safe to run again: `npm run seed`.
  * The app itself only reads categories from the database.
  */
-import { PrismaClient, TransactionType } from '@prisma/client';
+import prisma from '../src/lib/prisma';
+import { TransactionType } from '../src/generated/prisma/client';
 
 const BASE_CATEGORIES: { name: string; type: TransactionType }[] = [
   { name: 'Salario', type: 'INCOME' },
@@ -25,8 +26,6 @@ const BASE_CATEGORIES: { name: string; type: TransactionType }[] = [
   { name: 'Ahorros', type: 'EXPENSE' },
   { name: 'Otros gastos', type: 'EXPENSE' },
 ];
-
-const prisma = new PrismaClient();
 
 const main = async () => {
   let created = 0;

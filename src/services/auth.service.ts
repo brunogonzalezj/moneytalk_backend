@@ -1,4 +1,4 @@
-import { User } from '@prisma/client';
+import { User } from '../generated/prisma/client';
 import prisma from '../lib/prisma';
 import { AuthTokens, UserPayload } from '../types';
 import { AppError } from '../utils/AppError';
@@ -28,12 +28,14 @@ export class AuthService {
    */
   static async startSession(user: Pick<User, 'id' | 'email' | 'name' | 'avatar'>): Promise<Session> {
     const tokens = generateTokens({ id: user.id, email: user.email, name: user.name });
-    await prisma.$transaction([
-      prisma.refreshToken.deleteMany({ where: { userId: user.id, expiresAt: { lt: new Date() } } }),
-      prisma.refreshToken.create({
-        data: { userId: user.id, token: tokens.refreshToken, expiresAt: getRefreshTokenExpiryDate() },
-      }),
-    ]);
+    await prisma.refreshToken.create({
+      data: { userId: user.id, token: tokens.refreshToken, expiresAt: getRefreshTokenExpiryDate() },
+    });
+    // Housekeeping, outside any transaction: its range lock on refresh_tokens would
+    // deadlock with concurrent sign-ins, and a failed cleanup is harmless
+    await prisma.refreshToken
+      .deleteMany({ where: { userId: user.id, expiresAt: { lt: new Date() } } })
+      .catch(() => undefined);
     return { tokens, user: toUserPayload(user) };
   }
 

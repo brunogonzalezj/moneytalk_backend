@@ -1,5 +1,5 @@
 import { body, query } from 'express-validator';
-import { RecurrenceFrequency } from '@prisma/client';
+import { RecurrenceFrequency } from '../generated/prisma/client';
 
 const FREQUENCIES = Object.values(RecurrenceFrequency);
 const validDate = (value: unknown) => typeof value === 'string' && !Number.isNaN(Date.parse(value));

@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { TransactionType } from '@prisma/client';
+import { TransactionType } from '../src/generated/prisma/client';
 import { createApp } from '../src/app';
 import prisma from '../src/lib/prisma';
 

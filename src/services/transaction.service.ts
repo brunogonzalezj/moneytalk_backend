@@ -1,4 +1,4 @@
-import { Prisma, TransactionType } from '@prisma/client';
+import { Prisma, TransactionType } from '../generated/prisma/client';
 import { stringify } from 'csv-stringify/sync';
 import { Workbook } from 'exceljs';
 import prisma from '../lib/prisma';
@@ -160,15 +160,14 @@ export class TransactionService {
    * Totals, per-category breakdown and a time series for a date range, computed
    * in the database so clients never download every transaction.
    */
-  static async summary(userId: number, from: string, to: string, groupBy: GroupBy) {
+  static async summary(userId: number, from: string | undefined, to: string, groupBy: GroupBy) {
     const where: Prisma.TransactionWhereInput = { userId, date: isoDateRangeToBounds(from, to) };
 
     const [grouped, rows] = await Promise.all([
       prisma.transaction.groupBy({ by: ['categoryId'], where, _sum: { amount: true }, _count: { _all: true } }),
-      prisma.transaction.findMany({
-        where,
-        select: { date: true, amount: true, category: { select: { type: true } } },
-      }),
+      from
+        ? prisma.transaction.findMany({ where, select: { date: true, amount: true, category: { select: { type: true } } } })
+        : Promise.resolve([]),
     ]);
 
     const categories = await prisma.category.findMany({
@@ -190,7 +189,7 @@ export class TransactionService {
     });
 
     const series = new Map<string, { income: number; expense: number }>();
-    for (let bucket = bucketOf(from, groupBy); bucket <= to; bucket = nextBucket(bucket, groupBy)) {
+    for (let bucket = from && bucketOf(from, groupBy); bucket && bucket <= to; bucket = nextBucket(bucket, groupBy)) {
       series.set(bucket, { income: 0, expense: 0 });
     }
     for (const row of rows) {
@@ -201,7 +200,7 @@ export class TransactionService {
     }
 
     return {
-      range: { from, to, groupBy },
+      range: { from: from ?? null, to, groupBy },
       totals: { income: roundMoney(income), expense: roundMoney(expense), balance: roundMoney(income - expense), count },
       byCategory: byCategory
         .map((c) => {

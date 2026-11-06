@@ -1,4 +1,4 @@
-import { Prisma, SavingsGoal, SavingsGoalStatus, SavingsGoalType } from '@prisma/client';
+import { Prisma, SavingsGoal, SavingsGoalStatus, SavingsGoalType } from '../generated/prisma/client';
 import prisma from '../lib/prisma';
 import { AppError } from '../utils/AppError';
 import { isoDateToStoredDate } from '../utils/dates';

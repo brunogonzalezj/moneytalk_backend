@@ -1,4 +1,4 @@
-import { Prisma, RecurrenceFrequency } from '@prisma/client';
+import { Prisma, RecurrenceFrequency } from '../generated/prisma/client';
 import prisma from '../lib/prisma';
 import { AppError } from '../utils/AppError';
 import { calculateNextDate, isoDateToStoredDate, toLocalIsoDate } from '../utils/dates';

@@ -148,6 +148,16 @@ describe('GET /transactions/summary', () => {
     ]);
   });
 
+  it('returns all-time totals without a series when `from` is omitted', async () => {
+    const { food, salary, owner } = await setup();
+    await api().post('/api/transactions').set(owner.auth).send({ amount: 500, description: 'x', categoryId: salary.id, date: '2020-01-01' });
+    await api().post('/api/transactions').set(owner.auth).send({ amount: 120, description: 'x', categoryId: food.id, date: '2026-04-01' });
+
+    const res = await api().get('/api/transactions/summary?to=2026-12-31').set(owner.auth).expect(200);
+    expect(res.body.totals).toEqual({ income: 500, expense: 120, balance: 380, count: 2 });
+    expect(res.body.series).toEqual([]);
+  });
+
   it('groups by month', async () => {
     const { food, owner } = await setup();
     await api().post('/api/transactions').set(owner.auth).send({ amount: 10, description: 'x', categoryId: food.id, date: '2026-01-15' });
@@ -162,5 +172,29 @@ describe('GET /transactions/summary', () => {
       { period: '2026-02-01', income: 0, expense: 0 },
       { period: '2026-03-01', income: 0, expense: 30 },
     ]);
+  });
+});
+
+describe('GET /transactions/export', () => {
+  it('exports CSV and XLSX files with a download name', async () => {
+    const { food, owner } = await setup();
+    await api().post('/api/transactions').set(owner.auth).send({ amount: 12.5, description: 'Pan', categoryId: food.id, date: '2026-01-05' });
+
+    const csv = await api().get('/api/transactions/export?format=csv').set(owner.auth).expect(200);
+    expect(csv.headers['content-disposition']).toMatch(/attachment; filename="transacciones_.*\.csv"/);
+    expect(csv.text).toContain('2026-01-05,Pan,Comida,Gasto,12.50');
+
+    const xlsx = await api()
+      .get('/api/transactions/export?format=xlsx')
+      .set(owner.auth)
+      .buffer(true)
+      .parse((res, done) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => done(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+    // XLSX files are zip archives: they start with "PK"
+    expect((xlsx.body as Buffer).subarray(0, 2).toString()).toBe('PK');
   });
 });

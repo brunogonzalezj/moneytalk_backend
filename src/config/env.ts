@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import { z } from 'zod';
 
 // Loaded before anything reads process.env: server.ts imports this module first
-dotenv.config({ path: process.env.NODE_ENV === 'test' ? '.env.test' : '.env' });
+dotenv.config({ path: process.env.NODE_ENV === 'test' ? '.env.test' : '.env', quiet: true });
 
 const bool = (fallback: boolean) =>
   z

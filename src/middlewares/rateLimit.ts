@@ -1,19 +1,23 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { env } from '../config/env';
 import { AuthenticatedRequest } from '../types';
 import { AppError } from '../utils/AppError';
 
-const limiter = (windowMs: number, max: number, message: string, byUser = false) =>
+const limiter = (windowMs: number, limit: number, message: string, byUser = false) =>
   rateLimit({
     windowMs,
-    max,
+    limit,
     standardHeaders: true,
     legacyHeaders: false,
     // Tests hit these endpoints many times in a row
     skip: () => env.NODE_ENV === 'test',
-    // Authenticated endpoints are limited per user, the rest per IP
+    // Authenticated endpoints are limited per user, the rest per IP. ipKeyGenerator groups
+    // IPv6 clients by /56 subnet so rotating addresses can't dodge the limit
     keyGenerator: byUser
-      ? (req) => String((req as AuthenticatedRequest).user?.id ?? req.ip)
+      ? (req) => {
+          const userId = (req as AuthenticatedRequest).user?.id;
+          return userId ? `user:${userId}` : ipKeyGenerator(req.ip ?? '');
+        }
       : undefined,
     handler: (_req, _res, next) => next(AppError.tooManyRequests(message)),
   });
