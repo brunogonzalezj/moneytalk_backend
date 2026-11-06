@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/authMiddleware';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import webpush from 'web-push';
 import jwt from 'jsonwebtoken';
 
@@ -71,8 +71,8 @@ router.post('/unsubscribe', authMiddleware, async (req, res) => {
     await prisma.user.update({
       where: { id: userId },
       data: {
-        notificationSubscription: undefined,
-        notificationSettings: undefined
+        notificationSubscription: Prisma.DbNull,
+        notificationSettings: Prisma.DbNull
       }
     });
 
@@ -225,7 +225,7 @@ router.post('/test', authMiddleware, async (req, res) => {
 
 // Función para enviar notificaciones a un usuario específico
 export const sendNotificationToUser = async (
-  userId: string,
+  userId: number,
   title: string,
   body: string,
   options?: any
@@ -251,16 +251,16 @@ export const sendNotificationToUser = async (
       data: options?.data || {}
     });
 
-    await webpush.sendNotification(user.notificationSubscription, payload);
+    await webpush.sendNotification(user.notificationSubscription as any, payload);
     return true;
   } catch (error) {
     console.error(`Error al enviar notificación a usuario ${userId}:`, error);
 
     // Si la suscripción es inválida, eliminarla
-    if (error.statusCode === 410) {
+    if ((error as { statusCode?: number }).statusCode === 410) {
       await prisma.user.update({
         where: { id: userId },
-        data: { notificationSubscription: null }
+        data: { notificationSubscription: Prisma.DbNull }
       });
     }
 

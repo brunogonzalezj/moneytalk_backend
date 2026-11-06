@@ -87,6 +87,13 @@ export interface ReportSummary {
 }
 
 // Extend Express Request type
+// @types/passport declares req.user as an empty Express.User; align it with our JWT payload
+declare global {
+  namespace Express {
+    interface User extends UserPayload {}
+  }
+}
+
 export interface AuthenticatedRequest extends Request {
   user?: UserPayload;
 }
@@ -129,6 +136,15 @@ export interface TransactionListItem {
   type: 'INCOME' | 'EXPENSE'; // category.type
   date: string; // YYYY-MM-DD
   createdAt: string; // ISO
+}
+
+export type ExportFormat = 'CSV' | 'XLSX';
+
+export interface TransactionExportQuery {
+  userId: number;
+  dateFrom?: string; // YYYY-MM-DD
+  dateTo?: string;   // YYYY-MM-DD
+  format: ExportFormat;
 }
 
 export interface TransactionsListResponse {

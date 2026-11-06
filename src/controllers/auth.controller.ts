@@ -35,7 +35,10 @@ export class AuthController {
 
   static async updateProfile(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = req.user.id;
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: 'No autorizado' });
+      }
       const { name, email } = req.body;
 
       const updatedUser = await AuthService.updateProfile(userId, name, email);
@@ -47,7 +50,10 @@ export class AuthController {
 
   static async changePassword(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = req.user.id;
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: 'No autorizado' });
+      }
       const { currentPassword, newPassword } = req.body;
 
       await AuthService.changePassword(userId, currentPassword, newPassword);
@@ -88,7 +94,10 @@ export class AuthController {
 
   static async getCurrentUser(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = req.user.id;
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: 'No autorizado' });
+      }
       const user = await AuthService.getUserById(userId);
       res.json({ user });
     } catch (err) {

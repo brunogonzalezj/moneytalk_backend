@@ -541,7 +541,7 @@ ${Object.entries(data.expensesByCategory || {})
 
 🎯 METAS DE AHORRO:
 ${data.savingsGoals.length > 0
-  ? data.savingsGoals.map(goal =>
+  ? data.savingsGoals.map((goal: any) =>
       `• ${goal.name}: Bs ${goal.current.toLocaleString()} / Bs ${goal.target.toLocaleString()} (${goal.progress}% completado)`
     ).join('\n')
   : '• Sin metas de ahorro activas'}
@@ -551,7 +551,7 @@ ${data.savingsGoals.length > 0
 
 ⚡ DETECCIÓN DE ANOMALÍAS:
 ${data.largeTransactions.length > 0
-  ? data.largeTransactions.map(t =>
+  ? data.largeTransactions.map((t: any) =>
       `• ${t.description}: Bs ${t.amount.toLocaleString()} (${t.category} - ${new Date(t.date).toLocaleDateString()})`
     ).join('\n')
   : '• No se detectaron transacciones inusualmente grandes'}
@@ -667,13 +667,6 @@ async function safeCreateCompletion(messages: { role: 'system'|'user'|'assistant
         }
     }
     throw new Error('Demasiadas solicitudes a la API de OpenAI. Intenta más tarde.');
-}
-
-export async function testGetUserFinancialData(userId: number) {
-    console.log('=== TEST GET USER FINANCIAL DATA ===');
-    const data = await getUserFinancialData(userId);
-    console.log('Financial data result:', JSON.stringify(data, null, 2));
-    return data;
 }
 
 export async function generateRecommendations(req: any, res: any) {

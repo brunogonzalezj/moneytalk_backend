@@ -30,7 +30,7 @@ export class AuthService {
 
   static async loginUser(email: string, password: string): Promise<{ tokens: AuthTokens; user: UserPayload }> {
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) throw new Error('Credenciales inválidas');
+    if (!user || !user.passwordHash) throw new Error('Credenciales inválidas');
     const valid = await comparePassword(password, user.passwordHash);
     if (!valid) throw new Error('Credenciales inválidas');
     // Invalida todos los refresh tokens anteriores
@@ -110,6 +110,11 @@ export class AuthService {
       throw new Error('Usuario no encontrado');
     }
 
+    // Google-only accounts have no password to change
+    if (!existingUser.passwordHash) {
+      throw new Error('Esta cuenta no tiene contraseña. Inicia sesión con Google.');
+    }
+
     // Verify current password
     const isValidPassword = await comparePassword(currentPassword, existingUser.passwordHash);
     if (!isValidPassword) {
@@ -149,7 +154,7 @@ export class AuthService {
       id: user.id,
       email: user.email,
       name: user.name,
-      avatar: user.avatar
+      avatar: user.avatar ?? undefined
     };
   }
 }

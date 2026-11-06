@@ -15,15 +15,6 @@ const aiRateLimit = rateLimit({
 });
 
 router.post('/recommendations', authMiddleware, generateRecommendations);
-router.post('/debug-financial', authMiddleware, async (req, res) => {
-    const { testGetUserFinancialData } = await import('../services/aiService');
-    try {
-        const data = await testGetUserFinancialData(req.user.id);
-        res.json({ success: true, data });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
 
 export default router;
 
