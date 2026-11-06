@@ -2,7 +2,6 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { authMiddleware } from '../middlewares/authMiddleware';
 import { generateRecommendations } from '../services/aiService';
-import { testOpenAIConnection } from '../services/testOpenAI.service';
 
 const router = express.Router();
 
@@ -16,7 +15,6 @@ const aiRateLimit = rateLimit({
 });
 
 router.post('/recommendations', authMiddleware, generateRecommendations);
-router.post('/test', authMiddleware, testOpenAIConnection);
 router.post('/debug-financial', authMiddleware, async (req, res) => {
     const { testGetUserFinancialData } = await import('../services/aiService');
     try {
