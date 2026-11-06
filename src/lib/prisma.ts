@@ -15,7 +15,7 @@ const createClient = () => {
 
 // One client for the whole process; reused across ts-node-dev reloads in development
 declare global {
-  // eslint-disable-next-line no-var
+   
   var prisma: PrismaClient | undefined;
 }
 

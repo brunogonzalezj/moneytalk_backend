@@ -28,7 +28,7 @@ const toAppError = (err: unknown): AppError => {
  * Single error handler. Every error response has the shape
  * { error: { code, message, details? } } and never leaks internals.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+ 
 export const errorMiddleware = (err: unknown, req: Request, res: Response, _next: NextFunction): void => {
   const appError = toAppError(err);
 

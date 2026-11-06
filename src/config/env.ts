@@ -51,7 +51,7 @@ const parsed = schema.safeParse(process.env);
 
 if (!parsed.success) {
   const missing = parsed.error.issues.map((issue) => `  - ${issue.path.join('.')}: ${issue.message}`).join('\n');
-  // eslint-disable-next-line no-console
+   
   console.error(`Configuración inválida. Revisa tu archivo .env:\n${missing}`);
   process.exit(1);
 }
