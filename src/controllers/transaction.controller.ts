@@ -1,204 +1,63 @@
-//Create transaction controller based on the service
-import { Response, NextFunction } from 'express';
-import { TransactionService } from '../services/transaction.service';
-import prisma from '../prisma/client';
-import { TransactionUpdatePayload, AuthenticatedRequest, TransactionsListResponse, TransactionFilterType, ExportFormat } from '../types';
+import { Request, Response } from 'express';
+import { matchedData } from 'express-validator';
+import { TransactionType } from '@prisma/client';
+import { GroupBy, TransactionFilters, TransactionService } from '../services/transaction.service';
+import { ExportFormat } from '../types';
+
+const DEFAULT_PAGE_SIZE = 10;
+
+const readFilters = (query: Record<string, unknown>): TransactionFilters => ({
+  type: query.type === 'INCOME' || query.type === 'EXPENSE' ? (query.type as TransactionType) : undefined,
+  categoryId: query.category as number | undefined,
+  dateFrom: query.dateFrom as string | undefined,
+  dateTo: query.dateTo as string | undefined,
+  search: query.search as string | undefined,
+});
 
 export class TransactionController {
-  static async createTransaction(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-    try {
-      const { description, amount, categoryId, type, date, userId } = req.body as {
-        description?: string;
-        amount?: string | number;
-        categoryId?: string | number;
-        type?: 'INCOME' | 'EXPENSE';
-        date?: string | Date;
-        userId?: string | number;
-      };
-
-      // Convertir y validar tipos
-      const parsedUserId = typeof userId === 'string' ? parseInt(userId, 10) : typeof userId === 'number' ? userId : NaN;
-      const parsedCategoryId = typeof categoryId === 'string' ? parseInt(categoryId, 10) : typeof categoryId === 'number' ? categoryId : NaN;
-      const parsedAmount = typeof amount === 'string' ? parseFloat(amount) : typeof amount === 'number' ? amount : NaN;
-
-      if (!description || description.trim() === '') {
-        return res.status(400).json({ error: 'Descripción requerida' });
-      }
-      if (!Number.isFinite(parsedUserId)) {
-        return res.status(400).json({ error: 'ID de usuario inválido' });
-      }
-      if (!Number.isFinite(parsedCategoryId)) {
-        return res.status(400).json({ error: 'ID de categoría inválido' });
-      }
-      if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-        return res.status(400).json({ error: 'Monto inválido' });
-      }
-
-      // Validar fecha
-      const parsedDate = date instanceof Date ? date : new Date(date as string);
-      if (!date || isNaN(parsedDate.getTime())) {
-        return res.status(400).json({ error: 'Fecha inválida' });
-      }
-
-      // Verificar que la categoría existe
-      const category = await prisma.category.findUnique({ where: { id: parsedCategoryId } });
-      if (!category) {
-        return res.status(404).json({ error: 'Categoría no encontrada' });
-      }
-
-      // Validar que el type (si viene) coincide con el de la categoría
-      if (type && type !== category.type) {
-        return res.status(400).json({ error: 'El tipo de la transacción no coincide con el tipo de la categoría' });
-      }
-
-      const transaction = await TransactionService.createTransaction(
-        {
-          description: description.trim(),
-          amount: parsedAmount,
-          categoryId: parsedCategoryId,
-          date: parsedDate,
-          type,
-        },
-        parsedUserId
-      );
-
-      res.status(201).json(transaction);
-    } catch (error) {
-      console.error('Error creating transaction:', error);
-      return res.status(500).json({ error: 'Error interno del servidor' });
-    }
+  static async list(req: Request, res: Response) {
+    const query = matchedData(req, { locations: ['query'] });
+    const page = (query.page as number | undefined) ?? 1;
+    const limit = (query.limit as number | undefined) ?? DEFAULT_PAGE_SIZE;
+    res.json(await TransactionService.list(req.user!.id, readFilters(query), page, limit));
   }
 
-  static async getTransactions(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-    try {
-      console.log('🔍 getTransactions Debug:');
-      console.log('req.user:', req.user);
-
-      const authUserId = req.user?.id;
-      console.log('authUserId:', authUserId);
-
-      if (!authUserId) {
-        console.log('❌ No authUserId found');
-        return res.status(401).json({ error: 'No autorizado' });
-      }
-
-      // Parse and validate query params (sin userId en body ni query)
-      const pageRaw = (req.query.page as string) ?? '1';
-      const limitRaw = (req.query.limit as string) ?? '10';
-      const typeRaw = (req.query.type as string) ?? 'all';
-      const categoryRaw = req.query.category as string | undefined;
-      const dateFrom = req.query.dateFrom as string | undefined;
-      const dateTo = req.query.dateTo as string | undefined;
-      const search = req.query.search as string | undefined;
-
-      const page = Number.parseInt(pageRaw, 10);
-      const limit = Number.parseInt(limitRaw, 10);
-
-      if (!Number.isFinite(page) || page < 1) {
-        return res.status(400).json({ error: 'Parámetro "page" inválido. Debe ser un número positivo.' });
-      }
-      if (!Number.isFinite(limit) || limit < 1) {
-        return res.status(400).json({ error: 'Parámetro "limit" inválido. Debe ser un número positivo.' });
-      }
-
-      const allowedTypes: TransactionFilterType[] = ['INCOME', 'EXPENSE', 'all'];
-      const type = allowedTypes.includes(typeRaw as TransactionFilterType)
-        ? (typeRaw as TransactionFilterType)
-        : 'all';
-
-      const category = categoryRaw ? Number.parseInt(categoryRaw, 10) : undefined;
-      if (categoryRaw && (!Number.isFinite(category!) || category! < 1)) {
-        return res.status(400).json({ error: 'Parámetro "category" inválido. Debe ser un ID numérico positivo.' });
-      }
-
-      // Optional: validate date format YYYY-MM-DD (simple check)
-      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-      if (dateFrom && !dateRegex.test(dateFrom)) {
-        return res.status(400).json({ error: 'Parámetro "dateFrom" inválido. Formato esperado YYYY-MM-DD.' });
-      }
-      if (dateTo && !dateRegex.test(dateTo)) {
-        return res.status(400).json({ error: 'Parámetro "dateTo" inválido. Formato esperado YYYY-MM-DD.' });
-      }
-
-      const result: TransactionsListResponse = await TransactionService.getTransactions({
-        userId: authUserId, // ✅ Usar el userId del JWT, no del body
-        page,
-        limit,
-        type,
-        category,
-        dateFrom,
-        dateTo,
-        search,
-      });
-
-      return res.json(result);
-    } catch (err) {
-      next(err);
-    }
+  static async summary(req: Request, res: Response) {
+    const { from, to, groupBy } = req.query as { from: string; to: string; groupBy?: GroupBy };
+    res.json(await TransactionService.summary(req.user!.id, from, to, groupBy ?? 'day'));
   }
 
-  static async updateTransaction(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-    try {
-      const userId = req.user?.id;
-      if (!userId) {
-        return res.status(401).json({ error: 'No autorizado' });
-      }
-      const transactionId = parseInt(req.params.id, 10);
-      const updateData: TransactionUpdatePayload = req.body;
-      const updatedTransaction = await TransactionService.updateTransaction(transactionId, updateData, userId);
-      res.json(updatedTransaction);
-    } catch (err) {
-      next(err);
-    }
+  static async create(req: Request, res: Response) {
+    // Only validated fields reach the service; a userId in the body is ignored
+    const data = matchedData(req, { locations: ['body'] });
+    const transaction = await TransactionService.create(req.user!.id, {
+      amount: data.amount,
+      description: data.description,
+      date: data.date,
+      categoryId: data.categoryId,
+      type: data.type,
+    });
+    res.status(201).json(transaction);
   }
 
-  static async deleteTransaction(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-    try {
-      const userId = req.user?.id;
-      if (!userId) {
-        return res.status(401).json({ error: 'No autorizado' });
-      }
-      const transactionId = parseInt(req.params.id, 10);
-      await TransactionService.deleteTransaction(transactionId, userId);
-      res.status(204).send();
-    } catch (err) {
-      next(err);
-    }
+  static async update(req: Request, res: Response) {
+    const data = matchedData(req, { locations: ['body'] });
+    const id = matchedData(req, { locations: ['params'] }).id as number;
+    res.json(await TransactionService.update(req.user!.id, id, data));
   }
 
-  static async exportTransactions(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-    try {
-      const userId = req.user?.id;
-      if (!userId) {
-        return res.status(401).json({ error: 'No autorizado' });
-      }
+  static async remove(req: Request, res: Response) {
+    const id = matchedData(req, { locations: ['params'] }).id as number;
+    await TransactionService.remove(req.user!.id, id);
+    res.status(204).send();
+  }
 
-      const { dateFrom, dateTo, format } = req.query as { dateFrom?: string; dateTo?: string; format?: string };
-      const upperFormat = (format ?? 'CSV').toUpperCase();
-      if (!['CSV', 'XLSX'].includes(upperFormat)) {
-        return res.status(400).json({ error: 'Formato inválido. Usa CSV o XLSX.' });
-      }
-
-      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-      if (dateFrom && !dateRegex.test(dateFrom)) {
-        return res.status(400).json({ error: 'Parámetro "dateFrom" inválido. Usa YYYY-MM-DD.' });
-      }
-      if (dateTo && !dateRegex.test(dateTo)) {
-        return res.status(400).json({ error: 'Parámetro "dateTo" inválido. Usa YYYY-MM-DD.' });
-      }
-
-      const { buffer, filename, mimeType } = await TransactionService.exportTransactions({
-        userId,
-        dateFrom,
-        dateTo,
-        format: upperFormat as ExportFormat,
-      });
-
-      res.setHeader('Content-Type', mimeType);
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      return res.send(buffer);
-    } catch (error) {
-      next(error);
-    }
+  static async export(req: Request, res: Response) {
+    const query = matchedData(req, { locations: ['query'] });
+    const format = ((query.format as string | undefined) ?? 'CSV') as ExportFormat;
+    const { buffer, filename, mimeType } = await TransactionService.export(req.user!.id, readFilters(query), format);
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   }
 }

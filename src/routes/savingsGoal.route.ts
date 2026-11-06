@@ -1,43 +1,25 @@
-import express from 'express';
+import { Router } from 'express';
 import { SavingsGoalController } from '../controllers/savingsGoal.controller';
-import { authMiddleware } from '../middlewares/authMiddleware';
+import { authMiddleware } from '../middlewares/auth.middleware';
+import { validate } from '../middlewares/validate.middleware';
+import { asyncHandler } from '../utils/asyncHandler';
+import {
+  contributeValidator,
+  createSavingsGoalValidator,
+  listSavingsGoalsValidator,
+  updateSavingsGoalValidator,
+} from '../validators/savingsGoal.validator';
+import { idParamValidator } from '../validators/transaction.validator';
 
-const router = express.Router();
+const router = Router();
 
-router.get(
-  '/',
-  authMiddleware,
-  SavingsGoalController.getSavingsGoals
-);
+router.use(authMiddleware);
 
-router.get(
-  '/:id',
-  authMiddleware,
-  SavingsGoalController.getSavingsGoalById
-);
-
-router.post(
-  '/',
-  authMiddleware,
-  SavingsGoalController.createSavingsGoal
-);
-
-router.put(
-  '/:id',
-  authMiddleware,
-  SavingsGoalController.updateSavingsGoal
-);
-
-router.delete(
-  '/:id',
-  authMiddleware,
-  SavingsGoalController.deleteSavingsGoal
-);
-
-router.post(
-  '/:id/add',
-  authMiddleware,
-  SavingsGoalController.addToSavingsGoal
-);
+router.get('/', validate(listSavingsGoalsValidator), asyncHandler(SavingsGoalController.list));
+router.get('/:id', validate(idParamValidator), asyncHandler(SavingsGoalController.get));
+router.post('/', validate(createSavingsGoalValidator), asyncHandler(SavingsGoalController.create));
+router.put('/:id', validate([...idParamValidator, ...updateSavingsGoalValidator]), asyncHandler(SavingsGoalController.update));
+router.delete('/:id', validate(idParamValidator), asyncHandler(SavingsGoalController.remove));
+router.post('/:id/add', validate([...idParamValidator, ...contributeValidator]), asyncHandler(SavingsGoalController.contribute));
 
 export default router;

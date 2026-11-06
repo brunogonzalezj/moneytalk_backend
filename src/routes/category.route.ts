@@ -1,12 +1,15 @@
-import express from "express";
-import { CategoryController } from "../controllers/category.controller";
-import { authMiddleware } from "../middlewares/authMiddleware";
+import { Router } from 'express';
+import { CategoryController } from '../controllers/category.controller';
+import { authMiddleware } from '../middlewares/auth.middleware';
+import { validate } from '../middlewares/validate.middleware';
+import { asyncHandler } from '../utils/asyncHandler';
+import { createCategoryValidator, listCategoriesValidator } from '../validators/category.validator';
 
-const router = express.Router();
-// Create a new category (con autenticación)
-router.post("/", authMiddleware, CategoryController.createCategory);
-// Get all categories
-router.get("/", CategoryController.getCategories);
-router.post("/createCategories", CategoryController.createCategories);
+const router = Router();
+
+router.use(authMiddleware);
+
+router.get('/', validate(listCategoriesValidator), asyncHandler(CategoryController.list));
+router.post('/', validate(createCategoryValidator), asyncHandler(CategoryController.create));
 
 export default router;

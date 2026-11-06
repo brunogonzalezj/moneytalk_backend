@@ -1,20 +1,27 @@
-import express from 'express';
-import rateLimit from 'express-rate-limit';
-import { authMiddleware } from '../middlewares/authMiddleware';
-import { generateRecommendations } from '../services/aiService';
+import { Router } from 'express';
+import { AiController } from '../controllers/ai.controller';
+import { authMiddleware } from '../middlewares/auth.middleware';
+import { aiLimiter } from '../middlewares/rateLimit';
+import { validate } from '../middlewares/validate.middleware';
+import { asyncHandler } from '../utils/asyncHandler';
+import { categorizeValidator, recommendationsValidator } from '../validators/ai.validator';
 
-const router = express.Router();
+// Mounted at /api/ai
+export const aiRouter = Router();
+aiRouter.post(
+  '/recommendations',
+  authMiddleware,
+  aiLimiter,
+  validate(recommendationsValidator),
+  asyncHandler(AiController.recommendations)
+);
 
-// Rate limiting exclusivo para AI
-const aiRateLimit = rateLimit({
-  windowMs: 1 * 60 * 1000, // 15 minutos
-  max: 5, // máximo 5 requests por ventana por IP/usuario
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: 'Demasiadas solicitudes de recomendaciones, intenta más tarde'
-});
-
-router.post('/recommendations', authMiddleware, generateRecommendations);
-
-export default router;
-
+// Mounted at /api/gpt (path kept for the existing frontend)
+export const gptRouter = Router();
+gptRouter.post(
+  '/categorize',
+  authMiddleware,
+  aiLimiter,
+  validate(categorizeValidator),
+  asyncHandler(AiController.categorize)
+);

@@ -1,372 +1,227 @@
-import { RecurrenceFrequency } from '@prisma/client';
-import prisma from '../prisma/client';
-import { calculateNextDate } from '../utils/dateCalculations';
+import { Prisma, RecurrenceFrequency } from '@prisma/client';
+import prisma from '../lib/prisma';
+import { AppError } from '../utils/AppError';
+import { calculateNextDate, isoDateToStoredDate, toLocalIsoDate } from '../utils/dates';
+import { toMoney } from '../utils/decimal';
+import { CategoryService } from './category.service';
 
-interface CreateRecurringPaymentPayload {
+export interface RecurringPaymentInput {
   categoryId: number;
   name: string;
   amount: number;
-  description: string;
-  frequency: RecurrenceFrequency;
-  startDate: Date;
-  endDate?: Date;
-}
-
-interface UpdateRecurringPaymentPayload {
-  name?: string;
-  amount?: number;
   description?: string;
-  frequency?: RecurrenceFrequency;
-  nextDate?: Date;
-  endDate?: Date;
+  frequency: RecurrenceFrequency;
+  startDate: string; // YYYY-MM-DD or ISO
+  endDate?: string | null;
   isActive?: boolean;
 }
 
+// Safety cap for catching up on missed periods in a single run
+const MAX_CATCH_UP_OCCURRENCES = 31;
+
+const include = { category: { select: { id: true, name: true, type: true } } } as const;
+type Row = Prisma.RecurringPaymentGetPayload<{ include: typeof include }>;
+
+const toDto = (payment: Row) => ({
+  id: payment.id,
+  name: payment.name,
+  amount: toMoney(payment.amount),
+  description: payment.description,
+  frequency: payment.frequency,
+  startDate: payment.startDate.toISOString(),
+  nextDate: payment.nextDate.toISOString(),
+  endDate: payment.endDate?.toISOString() ?? null,
+  isActive: payment.isActive,
+  categoryId: payment.categoryId,
+  category: payment.category,
+  createdAt: payment.createdAt.toISOString(),
+  updatedAt: payment.updatedAt.toISOString(),
+});
+
+const toStoredDate = (value: string) =>
+  isoDateToStoredDate(/^\d{4}-\d{2}-\d{2}$/.test(value) ? value : toLocalIsoDate(new Date(value)));
+
+// End of today in the app's timezone, as the latest instant a payment counts as due
+const endOfToday = () => new Date(`${toLocalIsoDate(new Date())}T23:59:59.999Z`);
+const startOfToday = () => isoDateToStoredDate(toLocalIsoDate(new Date()));
+
+/** First occurrence on or after today, so a past start date or a pause never charges missed periods. */
+const firstUpcoming = (from: Date, frequency: RecurrenceFrequency) => {
+  const today = startOfToday();
+  let next = new Date(from);
+  while (next < today) next = calculateNextDate(next, frequency);
+  return next;
+};
+
 export class RecurringPaymentService {
-  static async getRecurringPayments(
-    userId: number,
-    filters?: { isActive?: boolean; frequency?: RecurrenceFrequency }
-  ): Promise<any[]> {
-    const where: any = { userId };
-
-    if (filters?.isActive !== undefined) {
-      where.isActive = filters.isActive;
-    }
-    if (filters?.frequency) {
-      where.frequency = filters.frequency;
-    }
-
-    const recurringPayments = await prisma.recurringPayment.findMany({
-      where,
-      include: {
-        category: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-          },
-        },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
-
-    return recurringPayments.map((rp) => ({
-      id: rp.id,
-      name: rp.name,
-      amount: parseFloat(rp.amount.toString()),
-      description: rp.description,
-      frequency: rp.frequency,
-      startDate: rp.startDate,
-      nextDate: rp.nextDate,
-      endDate: rp.endDate,
-      isActive: rp.isActive,
-      category: rp.category,
-    }));
+  private static async findOwned(userId: number, id: number) {
+    const payment = await prisma.recurringPayment.findFirst({ where: { id, userId }, include });
+    if (!payment) throw AppError.notFound('Pago recurrente no encontrado');
+    return payment;
   }
 
-  static async getRecurringPaymentById(
-    recurringPaymentId: number,
-    userId: number
-  ): Promise<any> {
-    const recurringPayment = await prisma.recurringPayment.findFirst({
+  static async list(userId: number, filters: { isActive?: boolean; frequency?: RecurrenceFrequency } = {}) {
+    const payments = await prisma.recurringPayment.findMany({
       where: {
-        id: recurringPaymentId,
         userId,
+        ...(filters.isActive !== undefined && { isActive: filters.isActive }),
+        ...(filters.frequency && { frequency: filters.frequency }),
       },
-      include: {
-        category: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-          },
-        },
-        transactions: {
-          orderBy: {
-            date: 'desc',
-          },
-          select: {
-            id: true,
-            amount: true,
-            description: true,
-            date: true,
-          },
-        },
-      },
+      include,
+      orderBy: { createdAt: 'desc' },
     });
+    return payments.map(toDto);
+  }
 
-    if (!recurringPayment) {
-      throw new Error('Recurring payment not found');
-    }
-
+  static async get(userId: number, id: number) {
+    const payment = await this.findOwned(userId, id);
+    const transactions = await prisma.transaction.findMany({
+      where: { recurringPaymentId: id, userId },
+      orderBy: { date: 'desc' },
+      take: 24,
+      select: { id: true, amount: true, description: true, date: true },
+    });
     return {
-      id: recurringPayment.id,
-      name: recurringPayment.name,
-      amount: parseFloat(recurringPayment.amount.toString()),
-      description: recurringPayment.description,
-      frequency: recurringPayment.frequency,
-      startDate: recurringPayment.startDate,
-      nextDate: recurringPayment.nextDate,
-      endDate: recurringPayment.endDate,
-      isActive: recurringPayment.isActive,
-      category: recurringPayment.category,
-      transactions: recurringPayment.transactions.map((t) => ({
-        id: t.id,
-        amount: parseFloat(t.amount.toString()),
-        description: t.description,
-        date: t.date,
-      })),
+      ...toDto(payment),
+      transactions: transactions.map((t) => ({ ...t, amount: toMoney(t.amount), date: t.date.toISOString() })),
     };
   }
 
-  static async createRecurringPayment(
-    data: CreateRecurringPaymentPayload,
-    userId: number
-  ): Promise<any> {
-    const { categoryId, name, amount, description, frequency, startDate, endDate } = data;
+  static async create(userId: number, input: RecurringPaymentInput) {
+    await CategoryService.assertAccessible(userId, input.categoryId);
+    const startDate = toStoredDate(input.startDate);
 
-    const category = await prisma.category.findUnique({
-      where: { id: categoryId },
-    });
-
-    if (!category) {
-      throw new Error('Category not found');
-    }
-
-    const nextDate = calculateNextDate(startDate, frequency);
-
-    const recurringPayment = await prisma.recurringPayment.create({
+    const payment = await prisma.recurringPayment.create({
       data: {
         userId,
-        categoryId,
-        name,
-        amount,
-        description,
+        categoryId: input.categoryId,
+        name: input.name,
+        amount: new Prisma.Decimal(input.amount),
+        description: input.description?.trim() || input.name,
+        frequency: input.frequency,
+        startDate,
+        // The first charge happens on the start date itself
+        nextDate: firstUpcoming(startDate, input.frequency),
+        endDate: input.endDate ? toStoredDate(input.endDate) : null,
+        isActive: input.isActive ?? true,
+      },
+      include,
+    });
+    return toDto(payment);
+  }
+
+  static async update(userId: number, id: number, changes: Partial<RecurringPaymentInput>) {
+    const current = await this.findOwned(userId, id);
+    if (changes.categoryId !== undefined) await CategoryService.assertAccessible(userId, changes.categoryId);
+
+    const startDate = changes.startDate ? toStoredDate(changes.startDate) : current.startDate;
+    const frequency = changes.frequency ?? current.frequency;
+    const scheduleChanged = changes.startDate !== undefined || changes.frequency !== undefined;
+    const resuming = changes.isActive === true && !current.isActive;
+
+    const payment = await prisma.recurringPayment.update({
+      where: { id },
+      data: {
+        ...(changes.name !== undefined && { name: changes.name }),
+        ...(changes.amount !== undefined && { amount: new Prisma.Decimal(changes.amount) }),
+        ...(changes.description !== undefined && { description: changes.description.trim() || current.name }),
+        ...(changes.categoryId !== undefined && { categoryId: changes.categoryId }),
+        ...(changes.endDate !== undefined && { endDate: changes.endDate ? toStoredDate(changes.endDate) : null }),
+        ...(changes.isActive !== undefined && { isActive: changes.isActive }),
         frequency,
         startDate,
-        nextDate,
-        endDate: endDate || null,
-        isActive: true,
+        ...(scheduleChanged && { nextDate: firstUpcoming(startDate, frequency) }),
+        // Resuming a paused payment continues from today, without charging the paused periods
+        ...(!scheduleChanged && resuming && { nextDate: firstUpcoming(current.nextDate, frequency) }),
       },
-      include: {
-        category: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-          },
-        },
-      },
+      include,
     });
-
-    return {
-      id: recurringPayment.id,
-      name: recurringPayment.name,
-      amount: parseFloat(recurringPayment.amount.toString()),
-      description: recurringPayment.description,
-      frequency: recurringPayment.frequency,
-      startDate: recurringPayment.startDate,
-      nextDate: recurringPayment.nextDate,
-      endDate: recurringPayment.endDate,
-      isActive: recurringPayment.isActive,
-      category: recurringPayment.category,
-    };
+    return toDto(payment);
   }
 
-  static async updateRecurringPayment(
-    recurringPaymentId: number,
-    data: UpdateRecurringPaymentPayload,
-    userId: number
-  ): Promise<any> {
-    const recurringPayment = await prisma.recurringPayment.findFirst({
-      where: {
-        id: recurringPaymentId,
-        userId,
-      },
-    });
-
-    if (!recurringPayment) {
-      throw new Error('Recurring payment not found');
-    }
-
-    const updateData: any = {};
-    if (data.name !== undefined) updateData.name = data.name;
-    if (data.amount !== undefined) updateData.amount = data.amount;
-    if (data.description !== undefined) updateData.description = data.description;
-    if (data.frequency !== undefined) updateData.frequency = data.frequency;
-    if (data.nextDate !== undefined) updateData.nextDate = data.nextDate;
-    if (data.endDate !== undefined) updateData.endDate = data.endDate;
-    if (data.isActive !== undefined) updateData.isActive = data.isActive;
-
-    const updatedRecurringPayment = await prisma.recurringPayment.update({
-      where: { id: recurringPaymentId },
-      data: updateData,
-      include: {
-        category: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-          },
-        },
-      },
-    });
-
-    return {
-      id: updatedRecurringPayment.id,
-      name: updatedRecurringPayment.name,
-      amount: parseFloat(updatedRecurringPayment.amount.toString()),
-      description: updatedRecurringPayment.description,
-      frequency: updatedRecurringPayment.frequency,
-      startDate: updatedRecurringPayment.startDate,
-      nextDate: updatedRecurringPayment.nextDate,
-      endDate: updatedRecurringPayment.endDate,
-      isActive: updatedRecurringPayment.isActive,
-      category: updatedRecurringPayment.category,
-    };
+  /** Deletes the schedule. Transactions it already created stay, unlinked (FK is SET NULL). */
+  static async remove(userId: number, id: number) {
+    await this.findOwned(userId, id);
+    await prisma.recurringPayment.delete({ where: { id } });
   }
 
-  static async deleteRecurringPayment(
-    recurringPaymentId: number,
-    userId: number
-  ): Promise<void> {
-    const recurringPayment = await prisma.recurringPayment.findFirst({
-      where: {
-        id: recurringPaymentId,
-        userId,
-      },
-    });
+  /** Records one occurrence now and moves the schedule forward, atomically. */
+  static async executeNow(userId: number, id: number) {
+    const payment = await this.findOwned(userId, id);
+    if (!payment.isActive) throw AppError.badRequest('El pago recurrente está pausado');
 
-    if (!recurringPayment) {
-      throw new Error('Recurring payment not found');
-    }
-
-    await prisma.recurringPayment.update({
-      where: { id: recurringPaymentId },
-      data: { isActive: false },
-    });
-  }
-
-  static async executeRecurringPayment(
-    recurringPaymentId: number,
-    userId: number
-  ): Promise<any> {
-    const recurringPayment = await prisma.recurringPayment.findFirst({
-      where: {
-        id: recurringPaymentId,
-        userId,
-      },
-    });
-
-    if (!recurringPayment) {
-      throw new Error('Recurring payment not found');
-    }
-
-    if (!recurringPayment.isActive) {
-      throw new Error('Recurring payment is not active');
-    }
-
-    const transaction = await prisma.transaction.create({
-      data: {
-        userId,
-        categoryId: recurringPayment.categoryId,
-        amount: recurringPayment.amount,
-        description: `${recurringPayment.name}: ${recurringPayment.description}`,
-        date: new Date(),
-        recurringPaymentId: recurringPayment.id,
-      },
-      include: {
-        category: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-          },
+    const [transaction] = await prisma.$transaction([
+      prisma.transaction.create({
+        data: {
+          userId,
+          categoryId: payment.categoryId,
+          amount: payment.amount,
+          description: payment.description || payment.name,
+          date: startOfToday(),
+          recurringPaymentId: payment.id,
         },
-      },
-    });
-
-    const newNextDate = calculateNextDate(
-      recurringPayment.nextDate,
-      recurringPayment.frequency
-    );
-
-    await prisma.recurringPayment.update({
-      where: { id: recurringPaymentId },
-      data: { nextDate: newNextDate },
-    });
+        include,
+      }),
+      prisma.recurringPayment.update({
+        where: { id },
+        data: { nextDate: calculateNextDate(payment.nextDate, payment.frequency) },
+      }),
+    ]);
 
     return {
       id: transaction.id,
-      amount: parseFloat(transaction.amount.toString()),
+      amount: toMoney(transaction.amount),
       description: transaction.description,
-      date: transaction.date,
+      date: transaction.date.toISOString(),
       category: transaction.category,
       recurringPaymentId: transaction.recurringPaymentId,
     };
   }
 
-  static async processAllRecurringPayments(): Promise<any> {
-    const today = new Date();
-    today.setHours(23, 59, 59, 999);
-
-    const duePayments = await prisma.recurringPayment.findMany({
-      where: {
-        isActive: true,
-        nextDate: {
-          lte: today,
-        },
-      },
-      include: {
-        category: true,
-      },
+  /**
+   * Creates the transactions for every due occurrence. Each occurrence is
+   * written together with the schedule update, so a crash can't charge twice.
+   */
+  static async processAllRecurringPayments() {
+    const due = await prisma.recurringPayment.findMany({
+      where: { isActive: true, nextDate: { lte: endOfToday() } },
     });
 
-    const results = [];
+    const results: { recurringPaymentId: number; created: number; success: boolean; error?: string }[] = [];
 
-    for (const payment of duePayments) {
-      if (payment.endDate && payment.nextDate > payment.endDate) {
-        await prisma.recurringPayment.update({
-          where: { id: payment.id },
-          data: { isActive: false },
-        });
-        continue;
-      }
-
+    for (const payment of due) {
+      let nextDate = payment.nextDate;
+      let created = 0;
       try {
-        const transaction = await prisma.transaction.create({
-          data: {
-            userId: payment.userId,
-            categoryId: payment.categoryId,
-            amount: payment.amount,
-            description: `${payment.name}: ${payment.description}`,
-            date: payment.nextDate,
-            recurringPaymentId: payment.id,
-          },
-        });
-
-        const newNextDate = calculateNextDate(payment.nextDate, payment.frequency);
-
-        await prisma.recurringPayment.update({
-          where: { id: payment.id },
-          data: { nextDate: newNextDate },
-        });
-
-        results.push({
-          recurringPaymentId: payment.id,
-          transactionId: transaction.id,
-          amount: parseFloat(transaction.amount.toString()),
-          description: transaction.description,
-          date: transaction.date,
-          success: true,
-        });
+        while (nextDate <= endOfToday() && created < MAX_CATCH_UP_OCCURRENCES) {
+          if (payment.endDate && nextDate > payment.endDate) {
+            await prisma.recurringPayment.update({ where: { id: payment.id }, data: { isActive: false } });
+            break;
+          }
+          const following = calculateNextDate(nextDate, payment.frequency);
+          await prisma.$transaction([
+            prisma.transaction.create({
+              data: {
+                userId: payment.userId,
+                categoryId: payment.categoryId,
+                amount: payment.amount,
+                description: payment.description || payment.name,
+                date: nextDate,
+                recurringPaymentId: payment.id,
+              },
+            }),
+            prisma.recurringPayment.update({ where: { id: payment.id }, data: { nextDate: following } }),
+          ]);
+          nextDate = following;
+          created++;
+        }
+        results.push({ recurringPaymentId: payment.id, created, success: true });
       } catch (error) {
         results.push({
           recurringPaymentId: payment.id,
+          created,
           success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
+          error: error instanceof Error ? error.message : 'Error desconocido',
         });
       }
     }

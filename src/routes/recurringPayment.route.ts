@@ -1,62 +1,29 @@
-import express from 'express';
+import { Router } from 'express';
 import { RecurringPaymentController } from '../controllers/recurringPayment.controller';
-import { authMiddleware } from '../middlewares/authMiddleware';
+import { authMiddleware, requireAdmin } from '../middlewares/auth.middleware';
+import { validate } from '../middlewares/validate.middleware';
+import { asyncHandler } from '../utils/asyncHandler';
 import {
   createRecurringPaymentValidator,
+  listRecurringPaymentsValidator,
   updateRecurringPaymentValidator,
-  getRecurringPaymentValidator,
-  deleteRecurringPaymentValidator,
-  executeRecurringPaymentValidator,
-  getRecurringPaymentsQueryValidator,
-} from '../validators/recurringPayments.validator';
+} from '../validators/recurringPayment.validator';
+import { idParamValidator } from '../validators/transaction.validator';
 
-const router = express.Router();
+const router = Router();
 
-router.get(
-  '/',
-  authMiddleware,
-  getRecurringPaymentsQueryValidator,
-  RecurringPaymentController.getRecurringPayments
-);
+router.use(authMiddleware);
 
-router.get(
-  '/:id',
-  authMiddleware,
-  getRecurringPaymentValidator,
-  RecurringPaymentController.getRecurringPaymentById
-);
-
-router.post(
-  '/',
-  authMiddleware,
-  createRecurringPaymentValidator,
-  RecurringPaymentController.createRecurringPayment
-);
-
+router.get('/', validate(listRecurringPaymentsValidator), asyncHandler(RecurringPaymentController.list));
+router.post('/process-all', asyncHandler(requireAdmin), asyncHandler(RecurringPaymentController.processAll));
+router.get('/:id', validate(idParamValidator), asyncHandler(RecurringPaymentController.get));
+router.post('/', validate(createRecurringPaymentValidator), asyncHandler(RecurringPaymentController.create));
 router.put(
   '/:id',
-  authMiddleware,
-  updateRecurringPaymentValidator,
-  RecurringPaymentController.updateRecurringPayment
+  validate([...idParamValidator, ...updateRecurringPaymentValidator]),
+  asyncHandler(RecurringPaymentController.update)
 );
-
-router.delete(
-  '/:id',
-  authMiddleware,
-  deleteRecurringPaymentValidator,
-  RecurringPaymentController.deleteRecurringPayment
-);
-
-router.post(
-  '/:id/execute',
-  authMiddleware,
-  executeRecurringPaymentValidator,
-  RecurringPaymentController.executeRecurringPayment
-);
-
-router.post(
-  '/process-all',
-  RecurringPaymentController.processAllRecurringPayments
-);
+router.delete('/:id', validate(idParamValidator), asyncHandler(RecurringPaymentController.remove));
+router.post('/:id/execute', validate(idParamValidator), asyncHandler(RecurringPaymentController.execute));
 
 export default router;

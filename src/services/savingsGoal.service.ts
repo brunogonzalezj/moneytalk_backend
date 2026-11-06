@@ -1,293 +1,140 @@
-import prisma from '../prisma/client';
-import { SavingsGoalType, SavingsGoalStatus } from '@prisma/client';
+import { Prisma, SavingsGoal, SavingsGoalStatus, SavingsGoalType } from '@prisma/client';
+import prisma from '../lib/prisma';
+import { AppError } from '../utils/AppError';
+import { isoDateToStoredDate } from '../utils/dates';
+import { toMoney } from '../utils/decimal';
+import { CategoryService } from './category.service';
 
-interface CreateSavingsGoalPayload {
+export interface SavingsGoalInput {
   name: string;
   description?: string;
   type: SavingsGoalType;
   targetAmount: number;
-  targetDate?: Date;
+  targetDate?: string; // YYYY-MM-DD or ISO
   status?: SavingsGoalStatus;
 }
 
-interface UpdateSavingsGoalPayload {
-  name?: string;
-  description?: string;
-  type?: SavingsGoalType;
-  targetAmount?: number;
-  currentAmount?: number;
-  targetDate?: Date;
-  status?: SavingsGoalStatus;
-}
+// Name of the expense category savings contributions are recorded under
+export const SAVINGS_CATEGORY_NAME = 'Ahorros';
+
+const toDto = (goal: SavingsGoal) => ({
+  id: String(goal.id),
+  name: goal.name,
+  description: goal.description ?? '',
+  type: goal.type,
+  targetAmount: toMoney(goal.targetAmount),
+  currentAmount: toMoney(goal.currentAmount),
+  targetDate: goal.targetDate?.toISOString(),
+  status: goal.status,
+  createdAt: goal.createdAt.toISOString(),
+  updatedAt: goal.updatedAt.toISOString(),
+});
+
+const toDate = (value: string) => (/^\d{4}-\d{2}-\d{2}$/.test(value) ? isoDateToStoredDate(value) : new Date(value));
+
+const oneYearFromNow = () => {
+  const date = new Date();
+  date.setFullYear(date.getFullYear() + 1);
+  return date;
+};
 
 export class SavingsGoalService {
-  static async getSavingsGoals(
-    userId: number,
-    filters?: { type?: SavingsGoalType; status?: SavingsGoalStatus }
-  ): Promise<any[]> {
-    const where: any = { userId };
-
-    if (filters?.type) {
-      where.type = filters.type;
-    }
-    if (filters?.status) {
-      where.status = filters.status;
-    }
-
-    const savingsGoals = await prisma.savingsGoal.findMany({
-      where,
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
-
-    return savingsGoals.map((goal) => ({
-      id: String(goal.id),
-      name: goal.name,
-      description: goal.description || '',
-      type: goal.type,
-      targetAmount: Number(goal.targetAmount),
-      currentAmount: Number(goal.currentAmount),
-      targetDate: goal.targetDate?.toISOString(),
-      status: goal.status,
-      createdAt: goal.createdAt.toISOString(),
-      updatedAt: goal.updatedAt.toISOString(),
-    }));
+  private static async findOwned(userId: number, id: number, client: Prisma.TransactionClient = prisma) {
+    const goal = await client.savingsGoal.findFirst({ where: { id, userId } });
+    if (!goal) throw AppError.notFound('Meta de ahorro no encontrada');
+    return goal;
   }
 
-  static async getSavingsGoalById(goalId: number, userId: number): Promise<any> {
-    const goal = await prisma.savingsGoal.findFirst({
-      where: {
-        id: goalId,
-        userId,
-      },
+  static async list(userId: number, filters: { type?: SavingsGoalType; status?: SavingsGoalStatus } = {}) {
+    const goals = await prisma.savingsGoal.findMany({
+      where: { userId, ...(filters.type && { type: filters.type }), ...(filters.status && { status: filters.status }) },
+      orderBy: { createdAt: 'desc' },
     });
-
-    if (!goal) {
-      throw new Error('Savings goal not found');
-    }
-
-    return {
-      id: String(goal.id),
-      name: goal.name,
-      description: goal.description || '',
-      type: goal.type,
-      targetAmount: Number(goal.targetAmount),
-      currentAmount: Number(goal.currentAmount),
-      targetDate: goal.targetDate?.toISOString(),
-      status: goal.status,
-      createdAt: goal.createdAt.toISOString(),
-      updatedAt: goal.updatedAt.toISOString(),
-    };
+    return goals.map(toDto);
   }
 
-  static async createSavingsGoal(
-    data: CreateSavingsGoalPayload,
-    userId: number
-  ): Promise<any> {
-    const { name, description, type, targetAmount, targetDate, status } = data;
+  static async get(userId: number, id: number) {
+    return toDto(await this.findOwned(userId, id));
+  }
 
-    // Set default target date to 1 year from now if not provided
-    const defaultTargetDate = new Date();
-    defaultTargetDate.setFullYear(defaultTargetDate.getFullYear() + 1);
-
-    const savingsGoal = await prisma.savingsGoal.create({
+  static async create(userId: number, input: SavingsGoalInput) {
+    const goal = await prisma.savingsGoal.create({
       data: {
         userId,
-        name,
-        description: description || '',
-        type,
-        targetAmount,
-        targetDate: targetDate || defaultTargetDate,
-        status: status || SavingsGoalStatus.ACTIVE,
+        name: input.name,
+        description: input.description ?? '',
+        type: input.type,
+        targetAmount: new Prisma.Decimal(input.targetAmount),
+        targetDate: input.targetDate ? toDate(input.targetDate) : oneYearFromNow(),
+        status: input.status ?? SavingsGoalStatus.ACTIVE,
       },
     });
-
-    return {
-      id: String(savingsGoal.id),
-      name: savingsGoal.name,
-      description: savingsGoal.description || '',
-      type: savingsGoal.type,
-      targetAmount: Number(savingsGoal.targetAmount),
-      currentAmount: Number(savingsGoal.currentAmount),
-      targetDate: savingsGoal.targetDate?.toISOString(),
-      status: savingsGoal.status,
-      createdAt: savingsGoal.createdAt.toISOString(),
-      updatedAt: savingsGoal.updatedAt.toISOString(),
-    };
+    return toDto(goal);
   }
 
-  static async updateSavingsGoal(
-    goalId: number,
-    data: UpdateSavingsGoalPayload,
-    userId: number
-  ): Promise<any> {
-    const goal = await prisma.savingsGoal.findFirst({
-      where: {
-        id: goalId,
-        userId,
+  // currentAmount only changes through contributions, so it is not editable here
+  static async update(userId: number, id: number, changes: Partial<SavingsGoalInput>) {
+    await this.findOwned(userId, id);
+    const goal = await prisma.savingsGoal.update({
+      where: { id },
+      data: {
+        ...(changes.name !== undefined && { name: changes.name }),
+        ...(changes.description !== undefined && { description: changes.description }),
+        ...(changes.type !== undefined && { type: changes.type }),
+        ...(changes.targetAmount !== undefined && { targetAmount: new Prisma.Decimal(changes.targetAmount) }),
+        ...(changes.targetDate !== undefined && { targetDate: toDate(changes.targetDate) }),
+        ...(changes.status !== undefined && { status: changes.status }),
       },
     });
-
-    if (!goal) {
-      throw new Error('Savings goal not found');
-    }
-
-    const updateData: any = {};
-    if (data.name !== undefined) updateData.name = data.name;
-    if (data.description !== undefined) updateData.description = data.description;
-    if (data.type !== undefined) updateData.type = data.type;
-    if (data.targetAmount !== undefined) updateData.targetAmount = data.targetAmount;
-    if (data.currentAmount !== undefined) updateData.currentAmount = data.currentAmount;
-    if (data.targetDate !== undefined) updateData.targetDate = data.targetDate;
-    if (data.status !== undefined) updateData.status = data.status;
-
-    const updatedGoal = await prisma.savingsGoal.update({
-      where: { id: goalId },
-      data: updateData,
-    });
-
-    return {
-      id: String(updatedGoal.id),
-      name: updatedGoal.name,
-      description: updatedGoal.description || '',
-      type: updatedGoal.type,
-      targetAmount: Number(updatedGoal.targetAmount),
-      currentAmount: Number(updatedGoal.currentAmount),
-      targetDate: updatedGoal.targetDate?.toISOString(),
-      status: updatedGoal.status,
-      createdAt: updatedGoal.createdAt.toISOString(),
-      updatedAt: updatedGoal.updatedAt.toISOString(),
-    };
+    return toDto(goal);
   }
 
-  static async deleteSavingsGoal(goalId: number, userId: number): Promise<void> {
-    const goal = await prisma.savingsGoal.findFirst({
-      where: {
-        id: goalId,
-        userId,
-      },
-    });
-
-    if (!goal) {
-      throw new Error('Savings goal not found');
-    }
-
-    await prisma.savingsGoal.delete({
-      where: { id: goalId },
-    });
+  static async remove(userId: number, id: number) {
+    await this.findOwned(userId, id);
+    await prisma.savingsGoal.delete({ where: { id } });
   }
 
-  static async addToSavingsGoal(
-    goalId: number,
-    amount: number,
-    userId: number
-  ): Promise<any> {
-    return await prisma.$transaction(async (tx) => {
-      const goal = await tx.savingsGoal.findFirst({
-        where: {
-          id: goalId,
-          userId,
-        },
-      });
+  /**
+   * Adds money to an active goal and records it as an expense in the
+   * "Ahorros" category, both in one database transaction.
+   */
+  static async contribute(userId: number, id: number, amount: number) {
+    const category = await CategoryService.ensureGlobal(SAVINGS_CATEGORY_NAME, 'EXPENSE');
 
-      if (!goal) {
-        throw new Error('Savings goal not found');
-      }
-
+    return prisma.$transaction(async (tx) => {
+      const goal = await this.findOwned(userId, id, tx);
       if (goal.status !== SavingsGoalStatus.ACTIVE) {
-        throw new Error('Cannot add money to inactive savings goal');
+        throw AppError.badRequest('Solo se puede aportar a metas activas');
       }
 
-      // Find or create savings category
-      let savingsCategory = await tx.category.findFirst({
-        where: {
-          name: 'Ahorros',
-          type: 'EXPENSE',
-        },
-      });
-
-      if (!savingsCategory) {
-        savingsCategory = await tx.category.create({
-          data: {
-            name: 'Ahorros',
-            type: 'EXPENSE',
-          },
-        });
-      }
-
-      // Create a transaction for the savings contribution
       const transaction = await tx.transaction.create({
         data: {
           userId,
-          categoryId: savingsCategory.id,
-          amount: amount,
+          categoryId: category.id,
+          amount: new Prisma.Decimal(amount),
           description: `Aporte a meta de ahorro: ${goal.name}`,
           date: new Date(),
         },
       });
 
-      // Update savings goal current amount
-      const currentAmount = Number(goal.currentAmount);
-      const newAmount = currentAmount + amount;
-
-      // Check if goal is completed
-      const targetAmount = Number(goal.targetAmount);
-      const newStatus = newAmount >= targetAmount ? SavingsGoalStatus.COMPLETED : goal.status;
-
-      const updatedGoal = await tx.savingsGoal.update({
-        where: { id: goalId },
+      const newAmount = goal.currentAmount.plus(amount);
+      const updated = await tx.savingsGoal.update({
+        where: { id },
         data: {
           currentAmount: newAmount,
-          status: newStatus,
+          status: newAmount.gte(goal.targetAmount) ? SavingsGoalStatus.COMPLETED : goal.status,
         },
       });
 
       return {
-        goal: {
-          id: String(updatedGoal.id),
-          name: updatedGoal.name,
-          description: updatedGoal.description || '',
-          type: updatedGoal.type,
-          targetAmount: Number(updatedGoal.targetAmount),
-          currentAmount: Number(updatedGoal.currentAmount),
-          targetDate: updatedGoal.targetDate?.toISOString(),
-          status: updatedGoal.status,
-          createdAt: updatedGoal.createdAt.toISOString(),
-          updatedAt: updatedGoal.updatedAt.toISOString(),
-        },
+        goal: toDto(updated),
         transaction: {
           id: transaction.id,
-          amount: Number(transaction.amount),
+          amount: toMoney(transaction.amount),
           description: transaction.description,
           date: transaction.date.toISOString(),
         },
       };
     });
-  }
-
-  static async getTotalSavingsAllocations(userId: number): Promise<number> {
-    const savingsGoals = await prisma.savingsGoal.findMany({
-      where: {
-        userId,
-        status: SavingsGoalStatus.ACTIVE,
-      },
-    });
-
-    return savingsGoals.reduce((total, goal) => {
-      const targetAmount = Number(goal.targetAmount);
-      const currentAmount = Number(goal.currentAmount);
-      const remaining = targetAmount - currentAmount;
-
-      // Calculate monthly allocation based on target date
-      if (goal.targetDate && remaining > 0) {
-        const now = new Date();
-        const target = new Date(goal.targetDate);
-        const monthsLeft = Math.max(1, Math.ceil((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24 * 30)));
-        return total + (remaining / monthsLeft);
-      }
-
-      return total;
-    }, 0);
   }
 }

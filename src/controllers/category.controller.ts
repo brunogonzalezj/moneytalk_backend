@@ -1,55 +1,16 @@
 import { Request, Response } from 'express';
+import { TransactionType } from '@prisma/client';
 import { CategoryService } from '../services/category.service';
-import { AuthenticatedRequest } from '../types';
 
 export class CategoryController {
-    static async createCategory(req: AuthenticatedRequest, res: Response) {
-        try {
-            const userId = req.user?.id;
-            const category = await CategoryService.createCategory(req.body, userId!);
-            res.status(201).json(category);
-        } catch (error: any) {
-            res.status(400).json({ error: error.message });
-        }
-    }
+  static async list(req: Request, res: Response) {
+    const type = req.query.type as TransactionType | undefined;
+    res.json(await CategoryService.listForUser(req.user!.id, type));
+  }
 
-    static async createCategories(req: AuthenticatedRequest, res: Response) {
-        try {
-            const categories = await CategoryService.createCategories(req.body);
-            res.status(201).json(categories);
-        } catch (error: any) {
-            res.status(400).json({ error: error.message });
-        }
-    }
-
-    static async getCategories(req: Request, res: Response) {
-        try {
-            const categories = await CategoryService.getCategories();
-            res.json(categories);
-        } catch (error: any) {
-            res.status(400).json({ error: error.message });
-        }
-    }
-
-    static async updateCategory(req: AuthenticatedRequest, res: Response) {
-        try {
-            const userId = req.user?.id;
-            const { id } = req.params;
-            const updated = await CategoryService.updateCategory(Number(id), req.body, userId!);
-            res.json(updated);
-        } catch (error: any) {
-            res.status(400).json({ error: error.message });
-        }
-    }
-
-    static async deleteCategory(req: AuthenticatedRequest, res: Response) {
-        try {
-            const userId = req.user?.id;
-            const { id } = req.params;
-            const deleted = await CategoryService.deleteCategory(Number(id), userId!);
-            res.json(deleted);
-        } catch (error: any) {
-            res.status(400).json({ error: error.message });
-        }
-    }
+  static async create(req: Request, res: Response) {
+    const { name, type } = req.body as { name: string; type: TransactionType };
+    const { category, created } = await CategoryService.create(req.user!.id, name, type);
+    res.status(created ? 201 : 200).json(category);
+  }
 }

@@ -1,7 +1,5 @@
 import { Request } from 'express';
-import { User } from '@prisma/client';
 
-// Authentication types
 export interface UserPayload {
   id: number;
   email: string;
@@ -14,118 +12,24 @@ export interface AuthTokens {
   refreshToken: string;
 }
 
-export interface SignupPayload {
-  email: string;
-  password: string;
-  displayName: string;
-}
-
-export interface LoginPayload {
-  email: string;
-  password: string;
-}
-
-export interface RefreshTokenPayload {
-  refreshToken: string;
-}
-
+// Claims carried by access and refresh tokens
 export interface TokenPayload {
-    id: number;
-  name: string;
-  userId: number;
+  id: number;
   email: string;
-}
-
-// Transaction types
-export interface TransactionPayload {
-  amount: number;
-  description: string;
-  date: string | Date;
-  categoryId: number;
-  type?: 'INCOME' | 'EXPENSE';
-}
-
-export interface TransactionUpdatePayload {
-  amount?: number;
-  description?: string;
-  date?: string | Date;
-  categoryId?: number;
-}
-
-export interface VoiceAnalysisResult {
-  categoryName: string;
-  amountExtracted: number;
-  descriptionExtracted: string;
-}
-
-// Category types
-export interface CategoryPayload {
   name: string;
-  type: 'INCOME' | 'EXPENSE';
 }
 
-export interface CategoryUpdatePayload {
-  name?: string;
-  type?: 'INCOME' | 'EXPENSE';
-}
-
-// Report types
-export interface ReportQueryParams {
-  startDate: string;
-  endDate: string;
-}
-
-export interface CategorySummary {
-  categoryName: string;
-  amount: number;
-}
-
-export interface ReportSummary {
-  totalIncome: number;
-  totalExpense: number;
-  byCategory: CategorySummary[];
-}
-
-// Extend Express Request type
-// @types/passport declares req.user as an empty Express.User; align it with our JWT payload
+// authMiddleware sets req.user from the access token
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
-    interface User extends UserPayload {}
+    interface Request {
+      user?: UserPayload;
+    }
   }
 }
 
-export interface AuthenticatedRequest extends Request {
-  user?: UserPayload;
-}
-
-// Pagination types
-export interface PaginationParams {
-  page: number;
-  limit: number;
-}
-
-export interface PaginatedResponse<T> {
-  data: T[];
-  pagination: {
-    page: number;
-    totalPages: number;
-    totalCount: number;
-  };
-}
-
-// Transaction list/query types for GET /api/transactions
-export type TransactionFilterType = 'INCOME' | 'EXPENSE' | 'all';
-
-export interface TransactionsQueryParams {
-  userId: number;
-  page: number; // >= 1
-  limit: number; // >= 1
-  type: TransactionFilterType; // category.type filter
-  category?: number; // categoryId
-  dateFrom?: string; // YYYY-MM-DD
-  dateTo?: string;   // YYYY-MM-DD
-  search?: string;   // description search
-}
+export type AuthenticatedRequest = Request;
 
 export interface TransactionListItem {
   id: string;
@@ -139,13 +43,6 @@ export interface TransactionListItem {
 }
 
 export type ExportFormat = 'CSV' | 'XLSX';
-
-export interface TransactionExportQuery {
-  userId: number;
-  dateFrom?: string; // YYYY-MM-DD
-  dateTo?: string;   // YYYY-MM-DD
-  format: ExportFormat;
-}
 
 export interface TransactionsListResponse {
   transactions: TransactionListItem[];

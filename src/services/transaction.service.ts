@@ -1,199 +1,245 @@
 import { Prisma, TransactionType } from '@prisma/client';
-import prisma from '../prisma/client';
-import { TransactionPayload, TransactionUpdatePayload, TransactionsListResponse, TransactionListItem, TransactionExportQuery } from '../types';
-import { Workbook } from 'exceljs';
 import { stringify } from 'csv-stringify/sync';
+import { Workbook } from 'exceljs';
+import prisma from '../lib/prisma';
+import { ExportFormat, TransactionListItem, TransactionsListResponse } from '../types';
+import { AppError } from '../utils/AppError';
+import { addDaysToIsoDate, isoDateRangeToBounds, isoDateToStoredDate, toLocalIsoDate } from '../utils/dates';
+import { roundMoney, toMoney } from '../utils/decimal';
+import { CategoryService } from './category.service';
+
+export type GroupBy = 'day' | 'week' | 'month';
+
+export interface TransactionFilters {
+  type?: TransactionType;
+  categoryId?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  search?: string;
+}
+
+export interface TransactionInput {
+  amount: number;
+  description: string;
+  date: string; // YYYY-MM-DD or a full ISO timestamp
+  categoryId: number;
+  type?: TransactionType;
+}
+
+const listSelect = {
+  id: true,
+  description: true,
+  amount: true,
+  date: true,
+  createdAt: true,
+  category: { select: { id: true, name: true, type: true } },
+} as const;
+
+type ListRow = Prisma.TransactionGetPayload<{ select: typeof listSelect }>;
+
+const toListItem = (t: ListRow): TransactionListItem => ({
+  id: String(t.id),
+  description: t.description,
+  amount: toMoney(t.amount),
+  category: t.category.name,
+  categoryId: t.category.id,
+  type: t.category.type,
+  date: t.date.toISOString().slice(0, 10),
+  createdAt: t.createdAt.toISOString(),
+});
+
+/**
+ * Transactions are calendar dates. A full timestamp from the client is read as
+ * the local calendar day it represents, then stored at 12:00 UTC.
+ */
+const toStoredDate = (value: string): Date => {
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : toLocalIsoDate(new Date(value));
+  return isoDateToStoredDate(isoDate);
+};
+
+const buildWhere = (userId: number, filters: TransactionFilters): Prisma.TransactionWhereInput => ({
+  userId,
+  ...(filters.categoryId && { categoryId: filters.categoryId }),
+  ...(filters.type && { category: { type: filters.type } }),
+  ...((filters.dateFrom || filters.dateTo) && { date: isoDateRangeToBounds(filters.dateFrom, filters.dateTo) }),
+  ...(filters.search?.trim() && { description: { contains: filters.search.trim() } }),
+});
+
+/** First day (YYYY-MM-DD) of the bucket that contains `isoDate`. Weeks start on Monday. */
+const bucketOf = (isoDate: string, groupBy: GroupBy): string => {
+  if (groupBy === 'day') return isoDate;
+  if (groupBy === 'month') return `${isoDate.slice(0, 7)}-01`;
+  const weekday = new Date(`${isoDate}T00:00:00Z`).getUTCDay(); // 0 = domingo
+  return addDaysToIsoDate(isoDate, -((weekday + 6) % 7));
+};
+
+const nextBucket = (bucket: string, groupBy: GroupBy): string => {
+  if (groupBy === 'day') return addDaysToIsoDate(bucket, 1);
+  if (groupBy === 'week') return addDaysToIsoDate(bucket, 7);
+  const [year, month] = bucket.split('-').map(Number);
+  return month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, '0')}-01`;
+};
 
 export class TransactionService {
-  static async createTransaction(data: TransactionPayload, userId: number): Promise<any> {
-    const { categoryId, amount, description, date, type } = data;
-
-    if (!userId) {
-      throw new Error('ID de usuario no proporcionado');
-    }
-    if (!categoryId) {
-      throw new Error('ID de categoría no proporcionado');
-    }
-    if (!description || description.trim() === '') {
-      throw new Error('Descripción requerida');
-    }
-    if (!Number.isFinite(amount) || amount <= 0) {
-      throw new Error('El monto debe ser un número mayor que cero');
-    }
-
-    const parsedDate = date instanceof Date ? date : new Date(date as string);
-    if (isNaN(parsedDate.getTime())) {
-      throw new Error('Fecha inválida');
-    }
-
-    // Validar existencia de categoría y coincidencia con type si se envía
-    const category = await prisma.category.findUnique({ where: { id: categoryId } });
-    if (!category) {
-      throw new Error('Categoría no encontrada');
-    }
-    if (type && type !== category.type) {
-      throw new Error('El tipo de la transacción no coincide con el tipo de la categoría');
-    }
-
-    return await prisma.transaction.create({
-      data: {
-        amount,
-        description: description.trim(),
-        date: parsedDate,
-        user: { connect: { id: userId } },
-        category: { connect: { id: categoryId } },
-      },
-    });
-  }
-
-  static async getTransactions(params: {
-    search: string | undefined;
-    limit: number;
-    dateTo: string | undefined;
-    page: number;
-    type: "INCOME" | "EXPENSE" | "all";
-    category: number | undefined;
-    dateFrom: string | undefined;
-    userId: number | undefined
-  }): Promise<TransactionsListResponse> {
-    const { userId, page, limit, type, category, dateFrom, dateTo, search } = params;
-
-    const andFilters: Prisma.TransactionWhereInput[] = [
-      { userId },
-    ];
-
-    if (category) {
-      andFilters.push({ categoryId: category });
-    }
-
-    if (search && search.trim() !== '') {
-      andFilters.push({ description: { contains: search.trim() } });
-    }
-
-    if (dateFrom || dateTo) {
-      const dateFilter: Prisma.DateTimeFilter = {};
-      if (dateFrom) {
-        const from = new Date(dateFrom + 'T00:00:00.000Z');
-        if (!isNaN(from.getTime())) dateFilter.gte = from;
-      }
-      if (dateTo) {
-        const to = new Date(dateTo + 'T23:59:59.999Z');
-        if (!isNaN(to.getTime())) dateFilter.lte = to;
-      }
-      if (dateFilter.gte || dateFilter.lte) {
-        andFilters.push({ date: dateFilter });
-      }
-    }
-
-    if (type === 'INCOME' || type === 'EXPENSE') {
-      andFilters.push({ category: { type: type as TransactionType } });
-    }
-
-    const where: Prisma.TransactionWhereInput = { AND: andFilters };
-
-    const totalItems = await prisma.transaction.count({ where });
-
-    const skip = (page - 1) * limit;
-    const take = limit;
-
-    const results = await prisma.transaction.findMany({
-      where,
-      include: {
-        category: { select: { id: true, name: true, type: true } },
-      },
-      orderBy: [
-        { date: 'desc' },
-        { createdAt: 'desc' },
-      ],
-      skip,
-      take,
-    });
-
-    const mapItem = (t: typeof results[number]): TransactionListItem => ({
-      id: String(t.id),
-      description: t.description,
-      amount: parseFloat(t.amount.toString()),
-      category: t.category.name,
-      categoryId: t.category.id,
-      type: t.category.type,
-      date: new Date(t.date).toISOString().slice(0, 10),
-      createdAt: t.createdAt.toISOString(),
-    });
-
-    const transactions = results.map(mapItem);
+  static async list(
+    userId: number,
+    filters: TransactionFilters,
+    page: number,
+    limit: number
+  ): Promise<TransactionsListResponse> {
+    const where = buildWhere(userId, filters);
+    const [totalItems, rows] = await Promise.all([
+      prisma.transaction.count({ where }),
+      prisma.transaction.findMany({
+        where,
+        select: listSelect,
+        orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
 
     const totalPages = Math.max(1, Math.ceil(totalItems / limit));
-    const currentPage = Math.min(page, totalPages);
-
     return {
-      transactions,
+      transactions: rows.map(toListItem),
       pagination: {
-        currentPage,
+        currentPage: page,
         totalPages,
         totalItems,
-        hasNextPage: currentPage < totalPages,
-        hasPrevPage: currentPage > 1,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
       },
     };
   }
 
-  static async updateTransaction(id: number, data: TransactionUpdatePayload, userId: number) {
-    return await prisma.transaction.updateMany({
-      where: { id, userId },
-      data,
-    });
-  }
-
-  static async deleteTransaction(id: number, userId: number) {
-    return await prisma.transaction.deleteMany({
-      where: { id, userId },
-    });
-  }
-
-  static async exportTransactions(params: TransactionExportQuery): Promise<{ buffer: Buffer; filename: string; mimeType: string }> {
-    const { userId, dateFrom, dateTo, format } = params;
-
-    if (!userId) {
-      throw new Error('Usuario no autenticado');
+  static async create(userId: number, input: TransactionInput): Promise<TransactionListItem> {
+    const category = await CategoryService.assertAccessible(userId, input.categoryId);
+    if (input.type && input.type !== category.type) {
+      throw AppError.badRequest('El tipo de la transacción no coincide con el de la categoría');
     }
 
-    const where: Prisma.TransactionWhereInput = {
-      userId,
+    const created = await prisma.transaction.create({
+      data: {
+        userId,
+        categoryId: category.id,
+        amount: roundMoney(input.amount),
+        description: input.description.trim(),
+        date: toStoredDate(input.date),
+      },
+      select: listSelect,
+    });
+    return toListItem(created);
+  }
+
+  /** Only amount, description, date and category can change; ownership is checked first. */
+  static async update(userId: number, id: number, changes: Partial<TransactionInput>): Promise<TransactionListItem> {
+    const existing = await prisma.transaction.findFirst({ where: { id, userId }, select: { id: true } });
+    if (!existing) throw AppError.notFound('Transacción no encontrada');
+
+    if (changes.categoryId !== undefined) await CategoryService.assertAccessible(userId, changes.categoryId);
+
+    const updated = await prisma.transaction.update({
+      where: { id },
+      data: {
+        ...(changes.amount !== undefined && { amount: roundMoney(changes.amount) }),
+        ...(changes.description !== undefined && { description: changes.description.trim() }),
+        ...(changes.date !== undefined && { date: toStoredDate(changes.date) }),
+        ...(changes.categoryId !== undefined && { categoryId: changes.categoryId }),
+      },
+      select: listSelect,
+    });
+    return toListItem(updated);
+  }
+
+  static async remove(userId: number, id: number): Promise<void> {
+    const { count } = await prisma.transaction.deleteMany({ where: { id, userId } });
+    if (count === 0) throw AppError.notFound('Transacción no encontrada');
+  }
+
+  /**
+   * Totals, per-category breakdown and a time series for a date range, computed
+   * in the database so clients never download every transaction.
+   */
+  static async summary(userId: number, from: string, to: string, groupBy: GroupBy) {
+    const where: Prisma.TransactionWhereInput = { userId, date: isoDateRangeToBounds(from, to) };
+
+    const [grouped, rows] = await Promise.all([
+      prisma.transaction.groupBy({ by: ['categoryId'], where, _sum: { amount: true }, _count: { _all: true } }),
+      prisma.transaction.findMany({
+        where,
+        select: { date: true, amount: true, category: { select: { type: true } } },
+      }),
+    ]);
+
+    const categories = await prisma.category.findMany({
+      where: { id: { in: grouped.map((g) => g.categoryId) } },
+      select: { id: true, name: true, type: true },
+    });
+    const categoryById = new Map(categories.map((c) => [c.id, c]));
+
+    let income = 0;
+    let expense = 0;
+    let count = 0;
+    const byCategory = grouped.map((g) => {
+      const category = categoryById.get(g.categoryId)!;
+      const total = toMoney(g._sum.amount);
+      if (category.type === 'INCOME') income += total;
+      else expense += total;
+      count += g._count._all;
+      return { categoryId: category.id, name: category.name, type: category.type, total, count: g._count._all };
+    });
+
+    const series = new Map<string, { income: number; expense: number }>();
+    for (let bucket = bucketOf(from, groupBy); bucket <= to; bucket = nextBucket(bucket, groupBy)) {
+      series.set(bucket, { income: 0, expense: 0 });
+    }
+    for (const row of rows) {
+      const bucket = series.get(bucketOf(row.date.toISOString().slice(0, 10), groupBy));
+      if (!bucket) continue;
+      if (row.category.type === 'INCOME') bucket.income += toMoney(row.amount);
+      else bucket.expense += toMoney(row.amount);
+    }
+
+    return {
+      range: { from, to, groupBy },
+      totals: { income: roundMoney(income), expense: roundMoney(expense), balance: roundMoney(income - expense), count },
+      byCategory: byCategory
+        .map((c) => {
+          const typeTotal = c.type === 'INCOME' ? income : expense;
+          return { ...c, percentage: typeTotal > 0 ? Math.round((c.total / typeTotal) * 1000) / 10 : 0 };
+        })
+        .sort((a, b) => b.total - a.total),
+      series: [...series.entries()].map(([period, values]) => ({
+        period,
+        income: roundMoney(values.income),
+        expense: roundMoney(values.expense),
+      })),
     };
+  }
 
-    if (dateFrom || dateTo) {
-      const dateFilter: Prisma.DateTimeFilter = {};
-      if (dateFrom) {
-        const from = new Date(dateFrom + 'T00:00:00.000Z');
-        if (!isNaN(from.getTime())) dateFilter.gte = from;
-      }
-      if (dateTo) {
-        const to = new Date(dateTo + 'T23:59:59.999Z');
-        if (!isNaN(to.getTime())) dateFilter.lte = to;
-      }
-      if (dateFilter.gte || dateFilter.lte) {
-        where.date = dateFilter;
-      }
-    }
-
-    const transactions = await prisma.transaction.findMany({
-      where,
-      include: { category: true },
-      orderBy: [{ date: 'desc' }],
+  static async export(userId: number, filters: TransactionFilters, format: ExportFormat) {
+    const rows = await prisma.transaction.findMany({
+      where: buildWhere(userId, filters),
+      select: listSelect,
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     });
 
-    const rows = transactions.map((t) => ({
+    const records = rows.map((t) => ({
       Fecha: t.date.toISOString().slice(0, 10),
       Descripcion: t.description,
-      Categoria: t.category?.name ?? '',
-      Tipo: t.category?.type === 'INCOME' ? 'Ingreso' : t.category?.type === 'EXPENSE' ? 'Gasto' : '',
-      Monto: t.amount.toString(),
+      Categoria: t.category.name,
+      Tipo: t.category.type === 'INCOME' ? 'Ingreso' : 'Gasto',
+      Monto: toMoney(t.amount).toFixed(2),
     }));
 
     if (format === 'CSV') {
-      const csv = stringify(rows, { header: true, delimiter: ',' });
-      const filename = buildFilename('csv', dateFrom, dateTo);
-      return { buffer: Buffer.from(csv, 'utf-8'), filename, mimeType: 'text/csv' };
+      // BOM so Excel opens accented characters correctly
+      const csv = '﻿' + stringify(records, { header: true, delimiter: ',' });
+      return {
+        buffer: Buffer.from(csv, 'utf-8'),
+        filename: buildFilename('csv', filters.dateFrom, filters.dateTo),
+        mimeType: 'text/csv; charset=utf-8',
+      };
     }
 
     const workbook = new Workbook();
@@ -205,11 +251,13 @@ export class TransactionService {
       { header: 'Tipo', key: 'Tipo', width: 12 },
       { header: 'Monto', key: 'Monto', width: 15 },
     ];
-    sheet.addRows(rows);
+    sheet.addRows(records.map((r) => ({ ...r, Monto: Number(r.Monto) })));
 
-    const buffer = await workbook.xlsx.writeBuffer();
-    const filename = buildFilename('xlsx', dateFrom, dateTo);
-    return { buffer: Buffer.from(buffer), filename, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
+    return {
+      buffer: Buffer.from(await workbook.xlsx.writeBuffer()),
+      filename: buildFilename('xlsx', filters.dateFrom, filters.dateTo),
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    };
   }
 }
 

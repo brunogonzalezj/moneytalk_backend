@@ -1,29 +1,27 @@
-//Create routes for transaction operations
-import express from 'express';
+import { Router } from 'express';
 import { TransactionController } from '../controllers/transaction.controller';
-import { authMiddleware } from '../middlewares/authMiddleware';
+import { authMiddleware } from '../middlewares/auth.middleware';
+import { validate } from '../middlewares/validate.middleware';
+import { asyncHandler } from '../utils/asyncHandler';
+import {
+  createTransactionValidator,
+  exportTransactionsValidator,
+  idParamValidator,
+  listTransactionsValidator,
+  summaryValidator,
+  updateTransactionValidator,
+} from '../validators/transaction.validator';
 
-const router = express.Router();
+const router = Router();
 
-// Proteger todas las rutas de transacciones
+router.use(authMiddleware);
 
-// Get transactions con paginación, filtros y ordenamiento
-router.get(
-  '/',
-    authMiddleware ,TransactionController.getTransactions
-);
-
-// Protected export route for transactions
-router.get(
-  '/export',
-  authMiddleware,
-  TransactionController.exportTransactions
-);
-
-// Crear una nueva transacción
-router.post(
-  '/',
-  TransactionController.createTransaction
-);
+router.get('/', validate(listTransactionsValidator), asyncHandler(TransactionController.list));
+// Declared before /:id so they are not taken as ids
+router.get('/summary', validate(summaryValidator), asyncHandler(TransactionController.summary));
+router.get('/export', validate(exportTransactionsValidator), asyncHandler(TransactionController.export));
+router.post('/', validate(createTransactionValidator), asyncHandler(TransactionController.create));
+router.put('/:id', validate(updateTransactionValidator), asyncHandler(TransactionController.update));
+router.delete('/:id', validate(idParamValidator), asyncHandler(TransactionController.remove));
 
 export default router;

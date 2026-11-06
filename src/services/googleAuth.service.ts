@@ -1,154 +1,54 @@
-import { OAuth2Client } from 'google-auth-library';
-import { PrismaClient } from '@prisma/client';
-import { generateTokens, getRefreshTokenExpiryDate } from '../utils/generateTokens';
-import { TokenPayload, AuthTokens, UserPayload } from '../types';
-
-const prisma = new PrismaClient();
-
-// Configuración del cliente de OAuth2 de Google
-const googleClient = new OAuth2Client(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  'postmessage' // Para el flujo de autorización
-);
+import { env } from '../config/env';
+import { getGoogleClient } from '../lib/googleClient';
+import prisma from '../lib/prisma';
+import { AppError } from '../utils/AppError';
+import { logger } from '../utils/logger';
+import { AuthService, Session } from './auth.service';
 
 export class GoogleAuthService {
   /**
-   * Verifica el token de ID de Google y crea o actualiza un usuario
+   * Verifies a Google ID token and signs the user in, creating the account on
+   * first use. An existing email account is only linked when Google confirms
+   * the address is verified.
    */
-  static async authenticateWithGoogle(token: string): Promise<{ tokens: AuthTokens; user: UserPayload; isNewUser: boolean }> {
+  static async authenticate(idToken: string): Promise<Session & { isNewUser: boolean }> {
+    if (!env.GOOGLE_CLIENT_ID) {
+      throw AppError.serviceUnavailable('El inicio de sesión con Google no está configurado');
+    }
+
+    let payload;
     try {
-      // Verificar el token con Google
-      const ticket = await googleClient.verifyIdToken({
-        idToken: token,
-        audience: process.env.GOOGLE_CLIENT_ID,
-      });
+      const ticket = await getGoogleClient().verifyIdToken({ idToken, audience: env.GOOGLE_CLIENT_ID });
+      payload = ticket.getPayload();
+    } catch (error) {
+      logger.warn('Token de Google rechazado', (error as Error).message);
+      throw AppError.unauthorized('No se pudo verificar tu cuenta de Google');
+    }
 
-      const payload = ticket.getPayload();
-      if (!payload || !payload.email) {
-        throw new Error('Token de Google inválido o sin email');
-      }
+    if (!payload?.email || !payload.sub) throw AppError.unauthorized('La cuenta de Google no tiene correo');
+    if (payload.email_verified !== true) {
+      throw AppError.unauthorized('Tu correo de Google no está verificado');
+    }
 
-      const { email, name, picture, sub: googleId } = payload;
+    const { email, name, picture, sub: googleId } = payload;
+    const existing = await prisma.user.findFirst({ where: { OR: [{ providerId: googleId }, { email }] } });
 
-      // Buscar usuario existente por email o por Google ID
-      let user = await prisma.user.findFirst({
-        where: {
-          OR: [
-            { email },
-            { providerId: googleId }
-          ]
-        }
-      });
-
-      let isNewUser = false;
-
-      if (user) {
-        // Si el usuario existe pero no tiene Google ID, actualizarlo
-        if (user.provider !== 'google' || !user.providerId) {
-          user = await prisma.user.update({
-            where: { id: user.id },
-            data: {
-              provider: 'google',
-              providerId: googleId,
-              avatar: picture,
-              name: name || user.name,
-            }
-          });
-        } else {
-          // Actualizar avatar y nombre si han cambiado
-          user = await prisma.user.update({
-            where: { id: user.id },
-            data: {
-              avatar: picture,
-              name: name || user.name,
-            }
-          });
-        }
-      } else {
-        // Crear nuevo usuario
-        user = await prisma.user.create({
-          data: {
-            email,
-            name: name || 'Usuario de Google',
-            provider: 'google',
-            providerId: googleId,
-            avatar: picture,
-          }
-        });
-        isNewUser = true;
-      }
-
-      // Invalidar refresh tokens anteriores
-      await prisma.refreshToken.deleteMany({ where: { userId: user.id } });
-
-      // Generar nuevos tokens
-      const tokenPayload: TokenPayload = {
-        id: user.id,
-        userId: user.id,
-        email: user.email,
-        name: user.name
-      };
-
-      const tokens = generateTokens(tokenPayload);
-
-      // Guardar refresh token
-      await prisma.refreshToken.create({
+    if (existing) {
+      const user = await prisma.user.update({
+        where: { id: existing.id },
         data: {
-          userId: user.id,
-          token: tokens.refreshToken,
-          expiresAt: getRefreshTokenExpiryDate(),
+          provider: 'google',
+          providerId: googleId,
+          avatar: picture ?? existing.avatar,
+          name: existing.name || name || 'Usuario de Google',
         },
       });
-
-      return {
-        tokens,
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          avatar: user.avatar
-        } as UserPayload,
-        isNewUser
-      };
-
-    } catch (error) {
-      console.error('Error en autenticación con Google:', error);
-      throw new Error('Error al autenticar con Google');
+      return { ...(await AuthService.startSession(user)), isNewUser: false };
     }
-  }
 
-  /**
-   * Obtiene la URL de autorización de Google
-   */
-  static getGoogleAuthUrl(): string {
-    const scopes = [
-      'https://www.googleapis.com/auth/userinfo.email',
-      'https://www.googleapis.com/auth/userinfo.profile'
-    ];
-
-    return googleClient.generateAuthUrl({
-      access_type: 'offline',
-      scope: scopes,
-      prompt: 'consent'
+    const user = await prisma.user.create({
+      data: { email, name: name || 'Usuario de Google', provider: 'google', providerId: googleId, avatar: picture },
     });
-  }
-
-  /**
-   * Intercambia el código de autorización por tokens
-   */
-  static async exchangeCodeForTokens(code: string): Promise<{ tokens: AuthTokens; user: UserPayload; isNewUser: boolean }> {
-    try {
-      const { tokens } = await googleClient.getToken(code);
-
-      if (!tokens.id_token) {
-        throw new Error('No se obtuvo ID token de Google');
-      }
-
-      return await this.authenticateWithGoogle(tokens.id_token);
-    } catch (error) {
-      console.error('Error intercambiando código por tokens:', error);
-      throw new Error('Error al intercambiar código de autorización');
-    }
+    return { ...(await AuthService.startSession(user)), isNewUser: true };
   }
 }
