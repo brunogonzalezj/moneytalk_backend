@@ -2,7 +2,7 @@
 import { Response, NextFunction } from 'express';
 import { TransactionService } from '../services/transaction.service';
 import prisma from '../prisma/client';
-import { TransactionUpdatePayload, AuthenticatedRequest, TransactionsListResponse, TransactionFilterType } from '../types';
+import { TransactionUpdatePayload, AuthenticatedRequest, TransactionsListResponse, TransactionFilterType, ExportFormat } from '../types';
 
 export class TransactionController {
   static async createTransaction(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -163,6 +163,42 @@ export class TransactionController {
       res.status(204).send();
     } catch (err) {
       next(err);
+    }
+  }
+
+  static async exportTransactions(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: 'No autorizado' });
+      }
+
+      const { dateFrom, dateTo, format } = req.query as { dateFrom?: string; dateTo?: string; format?: string };
+      const upperFormat = (format ?? 'CSV').toUpperCase();
+      if (!['CSV', 'XLSX'].includes(upperFormat)) {
+        return res.status(400).json({ error: 'Formato inválido. Usa CSV o XLSX.' });
+      }
+
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (dateFrom && !dateRegex.test(dateFrom)) {
+        return res.status(400).json({ error: 'Parámetro "dateFrom" inválido. Usa YYYY-MM-DD.' });
+      }
+      if (dateTo && !dateRegex.test(dateTo)) {
+        return res.status(400).json({ error: 'Parámetro "dateTo" inválido. Usa YYYY-MM-DD.' });
+      }
+
+      const { buffer, filename, mimeType } = await TransactionService.exportTransactions({
+        userId,
+        dateFrom,
+        dateTo,
+        format: upperFormat as ExportFormat,
+      });
+
+      res.setHeader('Content-Type', mimeType);
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      return res.send(buffer);
+    } catch (error) {
+      next(error);
     }
   }
 }

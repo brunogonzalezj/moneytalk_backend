@@ -13,6 +13,13 @@ router.get(
     authMiddleware ,TransactionController.getTransactions
 );
 
+// Protected export route for transactions
+router.get(
+  '/export',
+  authMiddleware,
+  TransactionController.exportTransactions
+);
+
 // Crear una nueva transacción
 router.post(
   '/',

@@ -15,6 +15,23 @@ export class CategoryService {
         if (!type) {
             throw new Error('Tipo de categoría requerido');
         }
+
+        // Verificar si la categoría ya existe con el mismo nombre y tipo
+        const existingCategory = await prisma.category.findFirst({
+            where: {
+                name: {
+                    equals: name
+                },
+                type: type
+            }
+        });
+
+        if (existingCategory) {
+            // Si la categoría ya existe con el mismo nombre y tipo, devolverla
+            return existingCategory;
+        }
+
+        // Si no existe, crearla (ahora el constraint permite mismo nombre con diferente tipo)
         return await prisma.category.create({
             data: {
                 name,

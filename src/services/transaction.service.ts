@@ -1,6 +1,8 @@
 import { Prisma, TransactionType } from '@prisma/client';
 import prisma from '../prisma/client';
-import { TransactionPayload, TransactionUpdatePayload, TransactionsListResponse, TransactionListItem } from '../types';
+import { TransactionPayload, TransactionUpdatePayload, TransactionsListResponse, TransactionListItem, TransactionExportQuery } from '../types';
+import { Workbook } from 'exceljs';
+import { stringify } from 'csv-stringify/sync';
 
 export class TransactionService {
   static async createTransaction(data: TransactionPayload, userId: number): Promise<any> {
@@ -147,4 +149,74 @@ export class TransactionService {
       where: { id, userId },
     });
   }
+
+  static async exportTransactions(params: TransactionExportQuery): Promise<{ buffer: Buffer; filename: string; mimeType: string }> {
+    const { userId, dateFrom, dateTo, format } = params;
+
+    if (!userId) {
+      throw new Error('Usuario no autenticado');
+    }
+
+    const where: Prisma.TransactionWhereInput = {
+      userId,
+    };
+
+    if (dateFrom || dateTo) {
+      const dateFilter: Prisma.DateTimeFilter = {};
+      if (dateFrom) {
+        const from = new Date(dateFrom + 'T00:00:00.000Z');
+        if (!isNaN(from.getTime())) dateFilter.gte = from;
+      }
+      if (dateTo) {
+        const to = new Date(dateTo + 'T23:59:59.999Z');
+        if (!isNaN(to.getTime())) dateFilter.lte = to;
+      }
+      if (dateFilter.gte || dateFilter.lte) {
+        where.date = dateFilter;
+      }
+    }
+
+    const transactions = await prisma.transaction.findMany({
+      where,
+      include: { category: true },
+      orderBy: [{ date: 'desc' }],
+    });
+
+    const rows = transactions.map((t) => ({
+      Fecha: t.date.toISOString().slice(0, 10),
+      Descripcion: t.description,
+      Categoria: t.category?.name ?? '',
+      Tipo: t.category?.type === 'INCOME' ? 'Ingreso' : t.category?.type === 'EXPENSE' ? 'Gasto' : '',
+      Monto: t.amount.toString(),
+    }));
+
+    if (format === 'CSV') {
+      const csv = stringify(rows, { header: true, delimiter: ',' });
+      const filename = buildFilename('csv', dateFrom, dateTo);
+      return { buffer: Buffer.from(csv, 'utf-8'), filename, mimeType: 'text/csv' };
+    }
+
+    const workbook = new Workbook();
+    const sheet = workbook.addWorksheet('Transacciones');
+    sheet.columns = [
+      { header: 'Fecha', key: 'Fecha', width: 15 },
+      { header: 'Descripción', key: 'Descripcion', width: 32 },
+      { header: 'Categoría', key: 'Categoria', width: 20 },
+      { header: 'Tipo', key: 'Tipo', width: 12 },
+      { header: 'Monto', key: 'Monto', width: 15 },
+    ];
+    sheet.addRows(rows);
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const filename = buildFilename('xlsx', dateFrom, dateTo);
+    return { buffer: Buffer.from(buffer), filename, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
+  }
 }
+
+const buildFilename = (extension: 'csv' | 'xlsx', from?: string, to?: string) => {
+  const parts = ['transacciones'];
+  if (from) parts.push(`desde-${from}`);
+  if (to) parts.push(`hasta-${to}`);
+  parts.push(new Date().toISOString().slice(0, 10));
+  return `${parts.join('_')}.${extension}`;
+};

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { AuthService } from '../services/auth.service';
+import { GoogleAuthService } from '../services/googleAuth.service';
 
 export class AuthController {
   static async signup(req: Request, res: Response, next: NextFunction) {
@@ -27,6 +28,69 @@ export class AuthController {
       const { refreshToken } = req.body;
       const { tokens, user } = await AuthService.refreshTokens(refreshToken);
       res.json({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, user });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async updateProfile(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user.id;
+      const { name, email } = req.body;
+
+      const updatedUser = await AuthService.updateProfile(userId, name, email);
+      res.json({ user: updatedUser });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async changePassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user.id;
+      const { currentPassword, newPassword } = req.body;
+
+      await AuthService.changePassword(userId, currentPassword, newPassword);
+      res.json({ message: 'Contraseña cambiada exitosamente' });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async googleAuth(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { token } = req.body;
+      const { tokens, user, isNewUser } = await GoogleAuthService.authenticateWithGoogle(token);
+      res.json({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, user, isNewUser });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async googleCallback(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { code } = req.body;
+      const { tokens, user, isNewUser } = await GoogleAuthService.exchangeCodeForTokens(code);
+      res.json({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, user, isNewUser });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async getGoogleAuthUrl(req: Request, res: Response, next: NextFunction) {
+    try {
+      const authUrl = GoogleAuthService.getGoogleAuthUrl();
+      res.json({ authUrl });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async getCurrentUser(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user.id;
+      const user = await AuthService.getUserById(userId);
+      res.json({ user });
     } catch (err) {
       next(err);
     }

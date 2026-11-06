@@ -12,11 +12,11 @@ export const generateTokens = (payload: TokenPayload): AuthTokens => {
   }
 
   const accessToken = jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
-    expiresIn: '24h',
+    expiresIn: '7d', // Aumentado de 24h a 7d
   });
 
   const refreshToken = jwt.sign(payload, process.env.JWT_REFRESH_SECRET, {
-    expiresIn: '30d',
+    expiresIn: '365d', // Aumentado de 30d a 1 año
   });
 
   return {
@@ -45,10 +45,10 @@ export const verifyToken = (token: string, isRefreshToken = false): TokenPayload
 
 /**
  * Calculates expiry date for refresh tokens
- * @returns Date object set 7 days in the future
+ * @returns Date object set 1 year in the future
  */
 export const getRefreshTokenExpiryDate = (): Date => {
   const date = new Date();
-  date.setDate(date.getDate() + 7);
+  date.setFullYear(date.getFullYear() + 1);
   return date;
 };

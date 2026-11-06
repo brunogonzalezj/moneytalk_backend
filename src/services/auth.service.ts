@@ -66,4 +66,90 @@ export class AuthService {
     });
     return { tokens, user: { id: user.id, email: user.email, name: user.name } };
   }
+
+  static async updateProfile(userId: number, name?: string, email?: string): Promise<UserPayload> {
+    // First verify the user exists
+    const existingUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!existingUser) {
+      throw new Error('Usuario no encontrado');
+    }
+
+    // If email is being updated, check if it's already taken by another user
+    if (email && email !== existingUser.email) {
+      const emailTaken = await prisma.user.findUnique({ where: { email } });
+      if (emailTaken) {
+        throw new Error('El correo electrónico ya está en uso');
+      }
+    }
+
+    // Update the user with provided fields
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(name && { name }),
+        ...(email && { email }),
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+      },
+    });
+
+    return {
+      id: updatedUser.id,
+      email: updatedUser.email,
+      name: updatedUser.name,
+    };
+  }
+
+  static async changePassword(userId: number, currentPassword: string, newPassword: string): Promise<void> {
+    // First verify the user exists
+    const existingUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!existingUser) {
+      throw new Error('Usuario no encontrado');
+    }
+
+    // Verify current password
+    const isValidPassword = await comparePassword(currentPassword, existingUser.passwordHash);
+    if (!isValidPassword) {
+      throw new Error('La contraseña actual es incorrecta');
+    }
+
+    // Hash new password
+    const newPasswordHash = await hashPassword(newPassword);
+
+    // Update password
+    await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: newPasswordHash },
+    });
+
+    // Invalidate all refresh tokens for security
+    await prisma.refreshToken.deleteMany({ where: { userId } });
+  }
+
+  static async getUserById(userId: number): Promise<UserPayload> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        avatar: true,
+        createdAt: true
+      }
+    });
+
+    if (!user) {
+      throw new Error('Usuario no encontrado');
+    }
+
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      avatar: user.avatar
+    };
+  }
 }
