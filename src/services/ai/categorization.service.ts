@@ -3,6 +3,7 @@ import {
   buildCategorizeSystemPrompt,
   buildCategorizeUserMessage,
   categorizeResponseSchema,
+  CategorizedTransaction,
 } from '../../prompts/categorize.prompt';
 import { addDaysToIsoDate, toLocalIsoDate, weekdayName } from '../../utils/dates';
 import { normalizeName, sanitizeFreeText } from '../../utils/text';
@@ -24,10 +25,18 @@ export interface CategorizeResult {
   rejectionReason?: string;
 }
 
+/**
+ * The first transaction's fields at the top level (what a single-transaction client reads), plus every
+ * valid transaction found in the text when the user dictated several at once.
+ */
+export interface CategorizeResponseBody extends CategorizeResult {
+  transactions: CategorizeResult[];
+}
+
 const RECENT_DAYS = 8;
 
 export class CategorizationService {
-  static async categorize(userId: number, rawText: string): Promise<CategorizeResult> {
+  static async categorize(userId: number, rawText: string): Promise<CategorizeResponseBody> {
     const text = sanitizeFreeText(rawText, MAX_CATEGORIZE_TEXT_LENGTH);
     const categories = await CategoryService.listForUser(userId);
 
@@ -47,9 +56,22 @@ export class CategorizationService {
       user: buildCategorizeUserMessage(text),
       schema: categorizeResponseSchema,
       temperature: 0.1,
-      maxTokens: 300,
+      maxTokens: 1200,
     });
 
+    const results = answer.transactions.map((item) => CategorizationService.toResult(item, categories, today, text));
+    const valid = results.filter((result) => result.isValidFinancialTransaction);
+    // Nothing usable: report why, from the first entry
+    if (!valid.length) return { ...results[0], transactions: [] };
+    return { ...valid[0], transactions: valid };
+  }
+
+  private static toResult(
+    answer: CategorizedTransaction,
+    categories: { name: string; type: TransactionType }[],
+    today: string,
+    text: string
+  ): CategorizeResult {
     if (!answer.isValidFinancialTransaction || !answer.amount || !answer.transactionType) {
       return {
         isValidFinancialTransaction: false,

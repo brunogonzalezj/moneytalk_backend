@@ -39,6 +39,31 @@ describe('POST /transactions', () => {
     expect(res.body.date).toBe('2026-03-15');
   });
 
+  it('rejects values of the wrong type, lists included', async () => {
+    const { food, owner } = await setup();
+    const valid = { amount: 10, description: 'Pan', date: '2026-01-01', categoryId: food.id };
+    for (const bad of [
+      { amount: 'diez' },
+      { amount: [10] },
+      { amount: -5 },
+      { categoryId: '1 OR 1=1' },
+      { description: ['Pan'] },
+      { description: { $gt: '' } },
+      { date: 'ayer' },
+    ]) {
+      await api().post('/api/transactions').set(owner.auth).send({ ...valid, ...bad }).expect(400);
+    }
+    await api().get('/api/transactions?page=1&page=2').set(owner.auth).expect(400);
+    expect(await prisma.transaction.count()).toBe(0);
+  });
+
+  it('stores SQL-looking text as plain text', async () => {
+    const { food, owner } = await setup();
+    const description = "Pan'); DROP TABLE transactions; --";
+    await api().post('/api/transactions').set(owner.auth).send({ amount: 10, description, date: '2026-01-01', categoryId: food.id }).expect(201);
+    expect((await prisma.transaction.findFirstOrThrow()).description).toBe(description);
+  });
+
   it('rejects a type that does not match the category', async () => {
     const { food, owner } = await setup();
     await api()
@@ -176,6 +201,13 @@ describe('GET /transactions/summary', () => {
 });
 
 describe('GET /transactions/export', () => {
+  it('neutralizes descriptions a spreadsheet would run as formulas', async () => {
+    const { food, owner } = await setup();
+    await api().post('/api/transactions').set(owner.auth).send({ amount: 10, description: '=HYPERLINK("http://x","clic")', date: '2026-01-01', categoryId: food.id }).expect(201);
+    const csv = await api().get('/api/transactions/export?format=csv').set(owner.auth).expect(200);
+    expect(csv.text).toContain(`'=HYPERLINK`);
+  });
+
   it('exports CSV and XLSX files with a download name', async () => {
     const { food, owner } = await setup();
     await api().post('/api/transactions').set(owner.auth).send({ amount: 12.5, description: 'Pan', categoryId: food.id, date: '2026-01-05' });

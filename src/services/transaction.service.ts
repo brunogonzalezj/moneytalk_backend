@@ -225,8 +225,8 @@ export class TransactionService {
 
     const records = rows.map((t) => ({
       Fecha: t.date.toISOString().slice(0, 10),
-      Descripcion: t.description,
-      Categoria: t.category.name,
+      Descripcion: asSpreadsheetText(t.description),
+      Categoria: asSpreadsheetText(t.category.name),
       Tipo: t.category.type === 'INCOME' ? 'Ingreso' : 'Gasto',
       Monto: toMoney(t.amount).toFixed(2),
     }));
@@ -259,6 +259,9 @@ export class TransactionService {
     };
   }
 }
+
+// Text a spreadsheet would read as a formula (=, +, -, @, tab, CR) is prefixed with ' so it stays plain text
+const asSpreadsheetText = (value: string) => (/^[=+\-@\t\r]/.test(value) ? `'${value}` : value);
 
 const buildFilename = (extension: 'csv' | 'xlsx', from?: string, to?: string) => {
   const parts = ['transacciones'];

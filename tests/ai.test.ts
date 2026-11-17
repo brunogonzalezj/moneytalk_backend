@@ -48,6 +48,39 @@ describe('POST /gpt/categorize', () => {
     expect(request.messages[0].content).not.toContain('almuerzo');
   });
 
+  it('returns every transaction when the text describes several', async () => {
+    const user = await createUser();
+    await createCategory('Transporte', 'EXPENSE');
+    await createCategory('Sueldo', 'INCOME');
+    const item = { confidence: 0.9, suggestedCategory: null, rejectionReason: null };
+    create.mockResolvedValue(
+      answer({
+        transactions: [
+          { ...item, isValidFinancialTransaction: true, transactionType: 'EXPENSE', amount: 20, description: 'Taxi', date: '2000-01-01', category: 'Transporte' },
+          { ...item, isValidFinancialTransaction: false, transactionType: null, amount: null, description: null, date: null, category: null, rejectionReason: 'Sin monto' },
+          { ...item, isValidFinancialTransaction: true, transactionType: 'INCOME', amount: 300, description: 'Pago', date: '2000-01-02', category: 'sueldo' },
+        ],
+      })
+    );
+
+    const res = await api().post('/api/gpt/categorize').set(user.auth).send({ text: 'taxi 20, un café y me pagaron 300' }).expect(200);
+
+    // The first one stays at the top level for clients that read a single transaction
+    expect(res.body).toMatchObject({ isValidFinancialTransaction: true, amountExtracted: 20, categoryName: 'Transporte' });
+    // Entries the model could not use are left out
+    expect(res.body.transactions).toHaveLength(2);
+    expect(res.body.transactions[1]).toMatchObject({ transactionTypeExtracted: 'INCOME', amountExtracted: 300, categoryName: 'Sueldo', dateExtracted: '2000-01-02' });
+  });
+
+  it('reports why when none of the transactions is usable', async () => {
+    const user = await createUser();
+    create.mockResolvedValue(
+      answer({ transactions: [{ isValidFinancialTransaction: false, confidence: 0.9, transactionType: null, amount: null, description: null, date: null, category: null, suggestedCategory: null, rejectionReason: 'Habla del clima' }] })
+    );
+    const res = await api().post('/api/gpt/categorize').set(user.auth).send({ text: 'hoy hace calor' }).expect(200);
+    expect(res.body).toMatchObject({ isValidFinancialTransaction: false, rejectionReason: 'Habla del clima', transactions: [] });
+  });
+
   it('never returns a future date', async () => {
     const user = await createUser();
     create.mockResolvedValue(
