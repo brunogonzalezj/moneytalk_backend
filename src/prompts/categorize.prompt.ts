@@ -1,15 +1,23 @@
 import { z } from 'zod';
 
+// The model sometimes writes "null" (or "none", "-") as text instead of a JSON null
+const PLACEHOLDERS = new Set(['', 'null', 'none', 'ninguna', 'ninguno', 'n/a', 'na', 'undefined', '-']);
+const optionalText = (max: number) =>
+  z.preprocess(
+    (value) => (typeof value === 'string' && PLACEHOLDERS.has(value.trim().toLowerCase()) ? null : value),
+    z.string().trim().max(max).nullable()
+  ).catch(null);
+
 const transactionSchema = z.object({
   isValidFinancialTransaction: z.boolean(),
   confidence: z.coerce.number().min(0).max(1).catch(0.5),
   transactionType: z.enum(['INCOME', 'EXPENSE']).nullable().catch(null),
   amount: z.coerce.number().positive().max(99_999_999).nullable().catch(null),
-  description: z.string().max(120).nullable().catch(null),
+  description: optionalText(120),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().catch(null),
-  category: z.string().max(60).nullable().catch(null),
-  suggestedCategory: z.string().max(40).nullable().catch(null),
-  rejectionReason: z.string().max(200).nullable().catch(null),
+  category: optionalText(60),
+  suggestedCategory: optionalText(40),
+  rejectionReason: optionalText(200),
 });
 
 /** Up to this many transactions are read from one utterance */
@@ -55,6 +63,8 @@ CATEGORÍAS DISPONIBLES (usa el nombre exacto si alguna encaja)
 - Ingresos (INCOME): ${incomeCategories.join(', ') || '(ninguna)'}
 - Gastos (EXPENSE): ${expenseCategories.join(', ') || '(ninguna)'}
 Si ninguna encaja, deja "category" en null y propone en "suggestedCategory" un nombre corto (1-2 palabras, en español, con mayúscula inicial).
+Toda transacción válida lleva "category" o "suggestedCategory": nunca dejes las dos en null ni escribas "null" como texto.
+La sugerencia nombra el rubro del gasto o ingreso (ej.: "Vehículo", "Mascotas", "Regalos"), nunca palabras genéricas como "Compra", "Gasto", "Pago" u "Otros".
 
 REGLAS
 - Es inválido si no hay un monto, o si el texto no trata de dinero (clima, deportes, charla, noticias).

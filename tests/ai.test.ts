@@ -81,6 +81,16 @@ describe('POST /gpt/categorize', () => {
     expect(res.body).toMatchObject({ isValidFinancialTransaction: false, rejectionReason: 'Habla del clima', transactions: [] });
   });
 
+  it('treats "null" written as text as no category', async () => {
+    const user = await createUser();
+    create.mockResolvedValue(
+      answer({ isValidFinancialTransaction: true, confidence: 0.9, transactionType: 'EXPENSE', amount: 200000, description: 'Compra de auto', date: '2000-01-01', category: 'null', suggestedCategory: 'null', rejectionReason: 'null' })
+    );
+    const res = await api().post('/api/gpt/categorize').set(user.auth).send({ text: 'el 19 de octubre compré un auto por 200000' }).expect(200);
+    expect(res.body.categoryName).toBe('');
+    expect(res.body.suggestedCategory).toBeUndefined();
+  });
+
   it('never returns a future date', async () => {
     const user = await createUser();
     create.mockResolvedValue(
