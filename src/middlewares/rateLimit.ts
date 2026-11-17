@@ -22,6 +22,7 @@ const limiter = (windowMs: number, limit: number, message: string, byUser = fals
     handler: (_req, _res, next) => next(AppError.tooManyRequests(message)),
   });
 
-export const authLimiter = limiter(60_000, 10, 'Demasiados intentos. Espera un minuto e intenta de nuevo.');
+// Per IP: people signing up together on one network (or behind one proxy) share it, so it leaves room for that
+export const authLimiter = limiter(60_000, 30, 'Demasiados intentos. Espera un minuto e intenta de nuevo.');
 
 export const aiLimiter = limiter(60_000, 10, 'Demasiadas solicitudes a la IA. Espera un minuto.', true);
