@@ -66,6 +66,12 @@ Si ninguna encaja, deja "category" en null y propone en "suggestedCategory" un n
 Toda transacción válida lleva "category" o "suggestedCategory": nunca dejes las dos en null ni escribas "null" como texto.
 La sugerencia nombra el rubro del gasto o ingreso (ej.: "Vehículo", "Mascotas", "Regalos"), nunca palabras genéricas como "Compra", "Gasto", "Pago" u "Otros".
 
+LENGUAJE COLOQUIAL (español de Bolivia)
+- "pesos", "bs", "bolivianos", "bolis" o un número sin moneda son montos en bolivianos; nunca rechaces por la palabra de la moneda.
+- Gasto (EXPENSE): "me tiré", "me gasté", "se me fue", "solté", "pagué", "me cobraron", "me clavaron", "compré", "invité", "presté".
+- Ingreso (INCOME): "me cayó", "me entró", "me depositaron", "me transfirieron", "cobré", "me pagaron", "gané", "vendí", "me devolvieron".
+- Los montos pueden venir en palabras ("doscientos", "dos mil quinientos") o con errores del dictado ("200 pesos en en el mercado").
+
 REGLAS
 - Es inválido si no hay un monto, o si el texto no trata de dinero (clima, deportes, charla, noticias).
 - "description": frase corta y limpia de lo que se compró o recibió, sin monto, fecha ni palabras como "ayer" (ej.: "Compra de alimentos", "Pago de salario").
